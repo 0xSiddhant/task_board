@@ -9,9 +9,13 @@ import SwiftUI
 
 struct BoardView: View {
     @StateObject private var viewModel: BoardViewModel
+    @State private var formMode: TaskFormMode?
     @Namespace private var cardNamespace
 
+    private let useCases: TaskUseCases
+
     init(useCases: TaskUseCases) {
+        self.useCases = useCases
         _viewModel = StateObject(wrappedValue: BoardViewModel(useCases: useCases))
     }
 
@@ -24,9 +28,7 @@ struct BoardView: View {
                         tasks: viewModel.tasks(in: status),
                         namespace: cardNamespace,
                         onDrop: { id, index in drop(id, into: status, at: index) },
-                        onSelect: { _ in
-                            // Plan 05: presents TaskFormSheet in edit mode.
-                        },
+                        onSelect: { task in formMode = .edit(task) },
                         onDelete: { task in
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                 viewModel.delete(task)
@@ -43,11 +45,14 @@ struct BoardView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    // Plan 05: presents TaskFormSheet in create mode.
+                    formMode = .create
                 } label: {
                     Label("New Task", systemImage: "plus")
                 }
             }
+        }
+        .sheet(item: $formMode) { mode in
+            TaskFormSheet(mode: mode, useCases: useCases)
         }
     }
 
