@@ -23,7 +23,7 @@ final class AppEnvironment: ObservableObject {
     let logUploadService: LogUploadService = NoOpLogUploadService()
 
     private let stack: CoreDataStack
-    private let repository: TaskRepositoryImpl
+    private let repository: CoreDataTaskRepository
     private let syncEngine: SyncEngine
 
     private var cancellables = Set<AnyCancellable>()
@@ -31,7 +31,7 @@ final class AppEnvironment: ObservableObject {
 
     init(inMemory: Bool = false) {
         stack = CoreDataStack(inMemory: inMemory)
-        repository = TaskRepositoryImpl(stack: stack)
+        repository = CoreDataTaskRepository(stack: stack)
         let fakeRemote = FakeRemoteTaskService()
         remote = fakeRemote
         remoteDebugControls = fakeRemote

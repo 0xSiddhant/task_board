@@ -9,7 +9,7 @@ import Combine
 import Foundation
 @testable import TaskManager
 
-/// In-memory stand-in for `TaskRepositoryImpl`, mirroring its outbox semantics:
+/// In-memory stand-in for `CoreDataTaskRepository`, mirroring its outbox semantics:
 /// every mutation queues exactly one entry carrying the pre-mutation
 /// `updatedAt`, and deletes are soft until `hardDelete`.
 final class MockTaskRepository: TaskRepository {

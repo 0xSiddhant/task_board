@@ -1,7 +1,7 @@
 import Combine
 import CoreData
 
-final class TaskRepositoryImpl: NSObject, TaskRepository {
+final class CoreDataTaskRepository: NSObject, TaskRepository {
     private let context: NSManagedObjectContext
 
     private let subject = CurrentValueSubject<[Task], Never>([])
@@ -240,7 +240,7 @@ final class TaskRepositoryImpl: NSObject, TaskRepository {
 
 // MARK: - Live updates
 
-extension TaskRepositoryImpl: NSFetchedResultsControllerDelegate {
+extension CoreDataTaskRepository: NSFetchedResultsControllerDelegate {
     func controllerDidChangeContent(_ controller: NSFetchedResultsController<NSFetchRequestResult>) {
         publishCurrent()
     }
