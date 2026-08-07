@@ -7,68 +7,118 @@
 
 import SwiftUI
 
-extension SyncStatus {
+extension TaskStatus {
     var symbolName: String {
         switch self {
-        case .pending: return "clock"
-        case .syncing: return "arrow.triangle.2.circlepath"
-        case .synced: return "checkmark.circle"
-        case .failed: return "exclamationmark.triangle"
+        case .todo: return "circle"
+        case .inProgress: return "circle.lefthalf.filled"
+        case .done: return "checkmark.circle.fill"
         }
     }
 
     var tint: Color {
         switch self {
-        case .pending: return .orange
-        case .syncing: return .blue
-        case .synced: return .green
-        case .failed: return .red
+        case .todo: return .secondary
+        case .inProgress: return .blue
+        case .done: return .green
         }
     }
+}
 
-    var accessibilityLabel: String {
+extension SyncStatus {
+    /// nil when synced — the resting state is the boring one, and a permanent
+    /// green tick next to a task-status tick is what made the card ambiguous.
+    var badge: (symbolName: String, tint: Color, label: String)? {
         switch self {
-        case .pending: return "Waiting to sync"
-        case .syncing: return "Syncing"
-        case .synced: return "Synced"
-        case .failed: return "Sync failed"
+        case .synced: return nil
+        case .pending: return ("clock", .orange, "Waiting to sync")
+        case .syncing: return ("arrow.triangle.2.circlepath", .blue, "Syncing")
+        case .failed: return ("exclamationmark.triangle.fill", .red, "Sync failed")
         }
     }
 }
 
 struct TaskCardView: View {
     let task: Task
+    var isLifted = false
+    var onDragChanged: ((CGSize, CGPoint) -> Void)?
+    var onDragEnded: (() -> Void)?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: task.status.symbolName)
+                .font(.subheadline)
+                .foregroundStyle(task.status.tint)
+                .contentTransition(.symbolEffect(.replace))
+                .accessibilityLabel(task.status.displayName)
+
+            VStack(alignment: .leading, spacing: 4) {
                 Text(task.title)
                     .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
                     .lineLimit(2)
 
-                Spacer(minLength: 0)
-
-                Image(systemName: task.syncStatus.symbolName)
-                    .font(.caption)
-                    .foregroundStyle(task.syncStatus.tint)
-                    .contentTransition(.symbolEffect(.replace))
-                    .accessibilityLabel(task.syncStatus.accessibilityLabel)
+                if !task.description.isEmpty {
+                    Text(task.description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
             }
 
-            if !task.description.isEmpty {
-                Text(task.description)
+            Spacer(minLength: 4)
+
+            if let badge = task.syncStatus.badge {
+                Image(systemName: badge.symbolName)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .foregroundStyle(badge.tint)
+                    .contentTransition(.symbolEffect(.replace))
+                    .accessibilityLabel(badge.label)
+            }
+
+            dragHandle
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background, in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(
+                    isLifted ? AnyShapeStyle(Color.accentColor.opacity(0.6)) : AnyShapeStyle(.quaternary),
+                    lineWidth: isLifted ? 1.5 : 1
+                )
+        }
+        .shadow(color: .black.opacity(isLifted ? 0.22 : 0), radius: isLifted ? 14 : 0, y: isLifted ? 8 : 0)
+        .scaleEffect(isLifted ? 1.03 : 1)
+        .animation(.smooth(duration: 0.25), value: isLifted)
+        .animation(.smooth(duration: 0.25), value: task.status)
+        .animation(.smooth(duration: 0.25), value: task.syncStatus)
+    }
+
+    /// Drawn rather than an SF Symbol — there is no 2x3 dot grid glyph, and a
+    /// missing symbol name fails silently. Generous padding makes the grab target
+    /// roughly 44pt even though the dots span 11pt.
+    private var dragHandle: some View {
+        VStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { _ in
+                HStack(spacing: 3) {
+                    Circle().frame(width: 3.5, height: 3.5)
+                    Circle().frame(width: 3.5, height: 3.5)
+                }
             }
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(.quaternary, lineWidth: 1)
-        )
-        .animation(.default, value: task.syncStatus)
+        .foregroundStyle(isLifted ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
+        .padding(.vertical, 14)
+        .padding(.leading, 10)
+        .padding(.trailing, 2)
+        .contentShape(Rectangle())
+            .accessibilityLabel("Drag to move task")
+            .gesture(
+                // minimumDistance 0 so the drag starts on touch-down rather than
+                // after the system's long-press delay.
+                DragGesture(minimumDistance: 0, coordinateSpace: .named(BoardLayout.coordinateSpace))
+                    .onChanged { onDragChanged?($0.translation, $0.location) }
+                    .onEnded { _ in onDragEnded?() }
+            )
     }
 }
