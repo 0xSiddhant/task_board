@@ -30,12 +30,18 @@ actor Logger {
         currentURL = dir.appendingPathComponent("current.log")
         previousURL = dir.appendingPathComponent("previous.log")
         self.maxFileSizeBytes = maxFileSizeBytes
-        // Static rather than the isolated instance method: calling actor-isolated
-        // members from init is a warning today and an error under Swift 6.
+        // Static, not the isolated instance method: calling actor-isolated members
+        // from init is an error under Swift 6.
         fileHandle = Logger.openHandle(at: currentURL)
     }
 
     // MARK: Public API
+
+    /// Fire-and-forget entry point for synchronous callers, so logging a line
+    /// doesn't force every call site into an async context.
+    nonisolated static func record(_ message: String, level: LogLevel = .info) {
+        _Concurrency.Task { await Logger.shared.log(message, level: level) }
+    }
 
     func log(_ message: String, level: LogLevel = .info) {
         let line = "[\(Self.timestamp())] [\(level.rawValue)] \(message)\n"

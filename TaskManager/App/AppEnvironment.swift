@@ -15,7 +15,10 @@ final class AppEnvironment: ObservableObject {
 
     let taskUseCases: TaskUseCases
     let networkMonitor = NetworkMonitor()
-    let remote: FakeRemoteTaskService
+    let remote: RemoteTaskService
+    /// Non-nil only when the backend is a test double, so Settings can hide its
+    /// fault-injection controls against a real one.
+    let remoteDebugControls: RemoteTaskDebugControls?
     /// No-op by default so the app runs with no Firebase project configured.
     let logUploadService: LogUploadService = NoOpLogUploadService()
 
@@ -29,9 +32,11 @@ final class AppEnvironment: ObservableObject {
     init(inMemory: Bool = false) {
         stack = CoreDataStack(inMemory: inMemory)
         repository = TaskRepositoryImpl(stack: stack)
-        remote = FakeRemoteTaskService()
+        let fakeRemote = FakeRemoteTaskService()
+        remote = fakeRemote
+        remoteDebugControls = fakeRemote
         taskUseCases = TaskUseCases(repository: repository)
-        syncEngine = SyncEngine(repository: repository, remote: remote)
+        syncEngine = SyncEngine(repository: repository, remote: fakeRemote)
 
         // statusChanges rather than $status: it only fires for fluctuations during
         // the session, so opening the app with no connection shows nothing.
@@ -43,12 +48,15 @@ final class AppEnvironment: ObservableObject {
     }
 
     func start() {
+        Logger.record("App started")
         _Concurrency.Task { await syncEngine.sync() }
     }
 
     // MARK: Banner
 
     private func connectivityChanged(to status: NetworkMonitor.Status) {
+        Logger.record("Connectivity changed to \(status)", level: .warning)
+
         switch status {
         case .offline:
             show(.offline)

@@ -10,30 +10,32 @@ import SwiftUI
 struct SettingsView: View {
     @StateObject private var viewModel: SettingsViewModel
 
-    init(remote: FakeRemoteTaskService, uploadService: LogUploadService) {
+    init(controls: RemoteTaskDebugControls?, uploadService: LogUploadService) {
         _viewModel = StateObject(
-            wrappedValue: SettingsViewModel(remote: remote, uploadService: uploadService)
+            wrappedValue: SettingsViewModel(controls: controls, uploadService: uploadService)
         )
     }
 
     var body: some View {
         Form {
-            Section {
-                Toggle("Force offline", isOn: $viewModel.forceOffline)
+            if viewModel.canConfigureBackend {
+                Section {
+                    Toggle("Force offline", isOn: $viewModel.forceOffline)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    LabeledContent("Failure rate", value: "\(Int(viewModel.failureRate * 100))%")
-                    Slider(value: $viewModel.failureRate, in: 0...1, step: 0.05)
-                }
+                    VStack(alignment: .leading, spacing: 4) {
+                        LabeledContent("Failure rate", value: "\(Int(viewModel.failureRate * 100))%")
+                        Slider(value: $viewModel.failureRate, in: 0...1, step: 0.05)
+                    }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    LabeledContent("Latency", value: String(format: "%.1fs", viewModel.simulatedLatency))
-                    Slider(value: $viewModel.simulatedLatency, in: 0...3, step: 0.1)
+                    VStack(alignment: .leading, spacing: 4) {
+                        LabeledContent("Latency", value: String(format: "%.1fs", viewModel.simulatedLatency))
+                        Slider(value: $viewModel.simulatedLatency, in: 0...3, step: 0.1)
+                    }
+                } header: {
+                    Text("Fake Backend")
+                } footer: {
+                    Text("Applies to the next sync attempt.")
                 }
-            } header: {
-                Text("Fake Backend")
-            } footer: {
-                Text("Applies to the next sync attempt.")
             }
 
             Section("Logs") {

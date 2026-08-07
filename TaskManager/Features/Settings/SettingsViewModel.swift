@@ -23,7 +23,7 @@ final class SettingsViewModel: ObservableObject {
 
     @Published private(set) var uploadState: UploadState = .idle
 
-    private let remote: FakeRemoteTaskService
+    private let controls: RemoteTaskDebugControls?
     private let uploadService: LogUploadService
 
     private var cancellables = Set<AnyCancellable>()
@@ -31,15 +31,18 @@ final class SettingsViewModel: ObservableObject {
     /// immediately push it back out.
     private var isLoading = false
 
-    init(remote: FakeRemoteTaskService, uploadService: LogUploadService) {
-        self.remote = remote
+    /// `controls` is nil against a real backend, which has no knobs to expose.
+    var canConfigureBackend: Bool { controls != nil }
+
+    init(controls: RemoteTaskDebugControls?, uploadService: LogUploadService) {
+        self.controls = controls
         self.uploadService = uploadService
 
         $forceOffline
             .dropFirst()
             .sink { [weak self] value in
                 guard let self, !self.isLoading else { return }
-                _Concurrency.Task { await self.remote.setForceOffline(value) }
+                _Concurrency.Task { await self.controls?.setForceOffline(value) }
             }
             .store(in: &cancellables)
 
@@ -47,7 +50,7 @@ final class SettingsViewModel: ObservableObject {
             .dropFirst()
             .sink { [weak self] value in
                 guard let self, !self.isLoading else { return }
-                _Concurrency.Task { await self.remote.setFailureRate(value) }
+                _Concurrency.Task { await self.controls?.setFailureRate(value) }
             }
             .store(in: &cancellables)
 
@@ -55,16 +58,17 @@ final class SettingsViewModel: ObservableObject {
             .dropFirst()
             .sink { [weak self] value in
                 guard let self, !self.isLoading else { return }
-                _Concurrency.Task { await self.remote.setSimulatedLatency(value) }
+                _Concurrency.Task { await self.controls?.setSimulatedLatency(value) }
             }
             .store(in: &cancellables)
     }
 
     func load() async {
+        guard let settings = await controls?.debugSettings() else { return }
         isLoading = true
-        forceOffline = await remote.forceOffline
-        failureRate = await remote.failureRate
-        simulatedLatency = await remote.simulatedLatency
+        forceOffline = settings.forceOffline
+        failureRate = settings.failureRate
+        simulatedLatency = settings.simulatedLatency
         isLoading = false
     }
 
@@ -81,6 +85,8 @@ final class SettingsViewModel: ObservableObject {
             await Logger.shared.reset()
             uploadState = .success
         } catch {
+            // After the reset above would be pointless; this one survives.
+            Logger.record("Log upload failed: \(error)", level: .error)
             uploadState = .failed(error.localizedDescription)
         }
     }

@@ -16,9 +16,8 @@ final class CoreDataStack {
             }
         }
 
-        // Background writes (the sync engine) and the UI context both touch the same
-        // rows, so merges have to resolve rather than throw. Object-trump means the
-        // in-memory version of a changed property wins over what's on disk.
+        // Background sync writes and the UI context touch the same rows, so merges
+        // have to resolve rather than throw.
         container.viewContext.automaticallyMergesChangesFromParent = true
         container.viewContext.mergePolicy = NSMergePolicy.mergeByPropertyObjectTrump
     }

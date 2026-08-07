@@ -1,3 +1,11 @@
+//
+//  TaskRepository.swift
+//  TaskManager
+//
+//  Created by Siddhant Kumar on 08/08/26.
+//
+
+import Combine
 import Foundation
 
 /// The remote operation an outbox entry replays. A move is an `update` — the
@@ -24,6 +32,11 @@ protocol TaskRepository {
     func moveTask(id: UUID, to status: TaskStatus, position: Double) -> Task?
     func deleteTask(id: UUID)
     func fetchTasks(status: TaskStatus?) -> [Task]
+
+    /// Live, ordered view of non-deleted tasks, re-emitting on any store change
+    /// including background sync writes. Observing here is what keeps Core Data
+    /// out of the ViewModels.
+    func tasksPublisher() -> AnyPublisher<[Task], Never>
 
     // MARK: Sync support
 

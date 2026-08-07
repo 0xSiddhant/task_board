@@ -1,10 +1,15 @@
+import Combine
 import CoreData
 
-final class TaskRepositoryImpl: TaskRepository {
+final class TaskRepositoryImpl: NSObject, TaskRepository {
     private let context: NSManagedObjectContext
+
+    private let subject = CurrentValueSubject<[Task], Never>([])
+    private var controller: NSFetchedResultsController<CDTask>?
 
     init(stack: CoreDataStack) {
         self.context = stack.viewContext
+        super.init()
     }
 
     // MARK: TaskRepository
@@ -67,8 +72,8 @@ final class TaskRepositoryImpl: TaskRepository {
         return result
     }
 
-    /// Soft delete. The row survives until plan 02's sync engine gets a remote ack,
-    /// so a delete queued offline is still replayable after a relaunch.
+    /// Soft delete. The row survives until the sync engine gets a remote ack, so
+    /// a delete queued offline is still replayable after a relaunch.
     func deleteTask(id: UUID) {
         context.performAndWait {
             guard let cdTask = fetch(id: id) else { return }
@@ -94,6 +99,34 @@ final class TaskRepositoryImpl: TaskRepository {
             result = ((try? context.fetch(request)) ?? []).map { $0.toDomain() }
         }
         return result
+    }
+
+    func tasksPublisher() -> AnyPublisher<[Task], Never> {
+        if controller == nil {
+            context.performAndWait { startObserving() }
+        }
+        return subject.eraseToAnyPublisher()
+    }
+
+    private func startObserving() {
+        let request = CDTask.typedFetchRequest()
+        request.predicate = NSPredicate(format: "deletedAt == nil")
+        request.sortDescriptors = [NSSortDescriptor(key: "position", ascending: true)]
+
+        let controller = NSFetchedResultsController(
+            fetchRequest: request,
+            managedObjectContext: context,
+            sectionNameKeyPath: nil,
+            cacheName: nil
+        )
+        controller.delegate = self
+        try? controller.performFetch()
+        self.controller = controller
+        publishCurrent()
+    }
+
+    private func publishCurrent() {
+        subject.send((controller?.fetchedObjects ?? []).map { $0.toDomain() })
     }
 
     // MARK: Sync support
@@ -135,8 +168,8 @@ final class TaskRepositoryImpl: TaskRepository {
         }
     }
 
-    /// No outbox entry here — this is remote state landing locally, not a local
-    /// change that needs pushing back.
+    /// No outbox entry: this is remote state landing locally, not a local change
+    /// that needs pushing back.
     func applyRemote(_ task: Task) {
         context.performAndWait {
             let cdTask = fetch(id: task.id) ?? CDTask(context: context)
@@ -164,8 +197,7 @@ final class TaskRepositoryImpl: TaskRepository {
     // MARK: Outbox
 
     /// Never saves. The caller commits the task change and this entry in one
-    /// `save()`, which is what makes a force-quit mid-write leave the queue
-    /// consistent rather than half-applied.
+    /// `save()`, so a force-quit mid-write can't half-apply them.
     private func enqueue(_ op: OutboxOp, taskId: UUID, baseUpdatedAt: Date) {
         let entry = CDOutboxEntry(context: context)
         entry.id = UUID()
@@ -201,18 +233,24 @@ final class TaskRepositoryImpl: TaskRepository {
             try context.save()
         } catch {
             context.rollback()
-            _Concurrency.Task {
-                await Logger.shared.log("Core Data save failed: \(error)", level: .error)
-            }
+            Logger.record("Core Data save failed: \(error)", level: .error)
         }
+    }
+}
+
+// MARK: - Live updates
+
+extension TaskRepositoryImpl: NSFetchedResultsControllerDelegate {
+    func controllerDidChangeContent(_ controller: NSFetchedResultsController<NSFetchRequestResult>) {
+        publishCurrent()
     }
 }
 
 // MARK: - Mapping
 
 private extension CDOutboxEntry {
-    /// Returns nil for an unrecognized op rather than guessing — the sync engine
-    /// drops those instead of replaying something it can't interpret.
+    /// nil for an unrecognized op, so the sync engine drops it rather than
+    /// replaying something it can't interpret.
     func toDomain() -> OutboxEntry? {
         guard let op = OutboxOp(rawValue: op) else { return nil }
         return OutboxEntry(

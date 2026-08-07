@@ -1,3 +1,10 @@
+//
+//  SyncEngine.swift
+//  TaskManager
+//
+//  Created by Siddhant Kumar on 08/08/26.
+//
+
 import Foundation
 
 actor SyncEngine {
@@ -9,17 +16,15 @@ actor SyncEngine {
         self.remote = remote
     }
 
-    /// Pull, diff, resolve, push — in that order. Resolving before pushing is the
-    /// point: a stale local change gets reconciled against the server version
-    /// first, so we never push a write that was already superseded.
+    /// Pull, diff, resolve, push. Resolving before pushing is the point: it stops
+    /// a write that was already superseded from going up.
     func sync() async {
         let remoteTasks: [Task]
         do {
             remoteTasks = try await remote.fetchTasks()
         } catch {
-            // Nothing is drained and nothing is marked failed — the queue is
-            // exactly as it was, ready for the next attempt.
-            await log("Sync pull failed: \(error)")
+            // Nothing drained, nothing marked failed: the queue is untouched.
+            await log("Sync pull failed: \(error)", level: .error)
             return
         }
 
@@ -27,9 +32,13 @@ actor SyncEngine {
         let pending = repository.pendingOutboxEntries()
         let queuedTaskIDs = Set(pending.map(\.taskId))
 
+        await log("Sync pulled \(remoteTasks.count) remote task(s), \(pending.count) queued locally")
+
         applyUncontestedRemoteChanges(remoteTasks, skipping: queuedTaskIDs)
         resolveConflicts(for: pending, against: serverByID)
         await push()
+
+        await log("Sync finished, \(repository.pendingOutboxEntries().count) entr(ies) still queued")
     }
 
     func hasConflict(baseUpdatedAt: Date, serverUpdatedAt: Date) -> Bool {
@@ -38,18 +47,15 @@ actor SyncEngine {
 
     // MARK: Steps
 
-    /// Remote rows we have no queued write for. Another device changed them, so
-    /// there's nothing to reconcile — take the server's word for it.
+    /// Remote rows with no queued write of ours. Nothing to reconcile.
     private func applyUncontestedRemoteChanges(_ remoteTasks: [Task], skipping queued: Set<UUID>) {
         for task in remoteTasks where !queued.contains(task.id) {
             repository.applyRemote(task)
         }
     }
 
-    /// A conflict is "the server moved since the version this write was based on".
-    /// Resolution is last-write-wins: if the server is newer than our local task,
-    /// the server overwrites it locally. If our local task is newer, we leave it
-    /// alone and let the push carry it up.
+    /// Last-write-wins. A newer server version overwrites locally and drops the
+    /// queued entry; a newer local version is left for the push to carry up.
     private func resolveConflicts(for pending: [OutboxEntry], against serverByID: [UUID: Task]) {
         for entry in pending {
             guard let serverTask = serverByID[entry.taskId],
@@ -64,9 +70,8 @@ actor SyncEngine {
         }
     }
 
-    /// Drains oldest-first and stops dead on the first failure. Skipping ahead
-    /// would reorder writes against the same task, so a stuck entry blocks the
-    /// queue by design.
+    /// Drains oldest-first and stops on the first failure. Skipping ahead would
+    /// reorder writes against the same task, so a stuck entry blocks the queue.
     private func push() async {
         for entry in repository.pendingOutboxEntries() {
             guard let task = repository.fetchTask(id: entry.taskId) else {
@@ -83,12 +88,12 @@ actor SyncEngine {
                 }
             } catch {
                 repository.markSyncStatus(.failed, for: entry.taskId)
-                await log("Sync push failed for \(entry.taskId): \(error)")
+                await log("Sync push failed for \(entry.taskId): \(error)", level: .error)
                 return
             }
 
-            // Only after the remote confirmed. A hard delete before the ack would
-            // lose the operation if the push failed.
+            // Only after the remote confirmed: a hard delete before the ack loses
+            // the operation if the push failed.
             if entry.op == .delete {
                 repository.hardDelete(id: task.id)
             } else {
@@ -98,7 +103,7 @@ actor SyncEngine {
         }
     }
 
-    private func log(_ message: String) async {
-        await Logger.shared.log(message, level: .error)
+    private func log(_ message: String, level: LogLevel = .info) async {
+        await Logger.shared.log(message, level: level)
     }
 }

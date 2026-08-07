@@ -5,8 +5,8 @@ final class CDOutboxEntry: NSManagedObject {
     @NSManaged var id: UUID
     @NSManaged var op: String
     @NSManaged var taskId: UUID
-    /// The task's `updatedAt` *before* the mutation this entry represents.
-    /// Plan 02's conflict check compares it against the server's version.
+    /// The task's `updatedAt` *before* this mutation. Conflict detection
+    /// compares it against the server's version.
     @NSManaged var baseUpdatedAt: Date
     @NSManaged var createdAt: Date
 }

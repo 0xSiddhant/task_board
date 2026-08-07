@@ -1,3 +1,10 @@
+//
+//  RemoteTaskService.swift
+//  TaskManager
+//
+//  Created by Siddhant Kumar on 08/08/26.
+//
+
 import Foundation
 
 protocol RemoteTaskService {
@@ -12,18 +19,43 @@ enum RemoteError: Error {
     case injectedFailure
 }
 
-/// The default backend. In-memory, so the app builds and runs with no external
-/// configuration — and the knobs make the offline and failure paths reachable
-/// without unplugging anything.
-actor FakeRemoteTaskService: RemoteTaskService {
+struct RemoteDebugSettings: Equatable {
+    var simulatedLatency: TimeInterval
+    var forceOffline: Bool
+    var failureRate: Double
+}
+
+/// Fault-injection knobs, deliberately kept off `RemoteTaskService` — a real
+/// backend has no failure rate. Only test doubles conform, which lets the
+/// composition root hold the protocol and still swap in a live implementation.
+protocol RemoteTaskDebugControls: Sendable {
+    func debugSettings() async -> RemoteDebugSettings
+    func setSimulatedLatency(_ value: TimeInterval) async
+    func setForceOffline(_ value: Bool) async
+    func setFailureRate(_ value: Double) async
+}
+
+/// The default backend. In-memory, so the app runs with no external
+/// configuration, and the knobs make the offline and failure paths reachable.
+actor FakeRemoteTaskService: RemoteTaskService, RemoteTaskDebugControls {
     private var storage: [UUID: Task] = [:]
 
     private(set) var simulatedLatency: TimeInterval = 0.3
     private(set) var forceOffline = false
     private(set) var failureRate: Double = 0
 
-    // Settable rather than public `var`s because actor state can't be assigned
-    // from outside the actor. Settings (plan 06) calls these.
+    // MARK: RemoteTaskDebugControls
+
+    // Methods rather than settable `var`s: actor state can't be assigned from
+    // outside the actor.
+    func debugSettings() -> RemoteDebugSettings {
+        RemoteDebugSettings(
+            simulatedLatency: simulatedLatency,
+            forceOffline: forceOffline,
+            failureRate: failureRate
+        )
+    }
+
     func setSimulatedLatency(_ value: TimeInterval) { simulatedLatency = value }
     func setForceOffline(_ value: Bool) { forceOffline = value }
     func setFailureRate(_ value: Double) { failureRate = min(max(value, 0), 1) }
@@ -52,8 +84,8 @@ actor FakeRemoteTaskService: RemoteTaskService {
 
     // MARK: Simulation
 
-    /// Latency first, then failure — a call that fails still costs time, which is
-    /// what makes the pending state visible in the UI.
+    /// Latency before failure, so a failing call still costs time and the pending
+    /// state stays visible.
     private func simulateRoundTrip() async throws {
         if simulatedLatency > 0 {
             try? await _Concurrency.Task.sleep(nanoseconds: UInt64(simulatedLatency * 1_000_000_000))

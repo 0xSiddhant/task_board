@@ -1,9 +1,5 @@
 import CoreData
 
-/// Hand-written because the model uses Manual/None codegen. The attributes here
-/// mirror `TaskManager.xcdatamodeld` exactly — non-optional in the model means
-/// non-optional here, which is safe only because the repository sets every field
-/// at insert time and is the sole writer.
 @objc(CDTask)
 final class CDTask: NSManagedObject {
     @NSManaged var id: UUID

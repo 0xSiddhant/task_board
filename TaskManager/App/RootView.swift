@@ -18,7 +18,7 @@ struct RootView: View {
                         ToolbarItem(placement: .topBarLeading) {
                             NavigationLink {
                                 SettingsView(
-                                    remote: environment.remote,
+                                    controls: environment.remoteDebugControls,
                                     uploadService: environment.logUploadService
                                 )
                             } label: {

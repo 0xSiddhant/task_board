@@ -1,3 +1,10 @@
+//
+//  Task.swift
+//  TaskManager
+//
+//  Created by Siddhant Kumar on 08/08/26.
+//
+
 import Foundation
 
 enum TaskStatus: String, CaseIterable {
@@ -13,9 +20,8 @@ enum SyncStatus: String {
     case failed
 }
 
-/// The domain task. Deliberately free of Core Data — everything above the
-/// repository works with this type, so use cases and ViewModels stay testable
-/// without a persistent store.
+/// Deliberately free of Core Data: everything above the repository uses this
+/// type, so use cases and ViewModels stay testable without a store.
 struct Task: Identifiable, Equatable {
     let id: UUID
     var title: String

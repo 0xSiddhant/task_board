@@ -1,21 +1,32 @@
+import Combine
 import Foundation
 
 struct TaskUseCases {
     let repository: TaskRepository
 
+    func observeTasks() -> AnyPublisher<[Task], Never> {
+        repository.tasksPublisher()
+    }
+
+    // Logged by id, never by title — these lines end up in an uploaded file.
     func create(title: String, description: String) -> Task {
-        repository.createTask(title: title, description: description)
+        let task = repository.createTask(title: title, description: description)
+        Logger.record("Created task \(task.id)")
+        return task
     }
 
     func update(id: UUID, title: String?, description: String?) -> Task? {
-        repository.updateTask(id: id, title: title, description: description)
+        Logger.record("Updated task \(id)")
+        return repository.updateTask(id: id, title: title, description: description)
     }
 
     func move(id: UUID, to status: TaskStatus, afterPosition before: Double?, beforePosition after: Double?) -> Task? {
-        repository.moveTask(id: id, to: status, position: Self.fractionalPosition(before: before, after: after))
+        Logger.record("Moved task \(id) to \(status.rawValue)")
+        return repository.moveTask(id: id, to: status, position: Self.fractionalPosition(before: before, after: after))
     }
 
     func delete(id: UUID) {
+        Logger.record("Deleted task \(id)")
         repository.deleteTask(id: id)
     }
 
