@@ -1,3 +1,10 @@
+//
+//  Logger.swift
+//  TaskManager
+//
+//  Created by Siddhant Kumar on 08/08/26.
+//
+
 import Foundation
 
 enum LogLevel: String {
@@ -23,7 +30,9 @@ actor Logger {
         currentURL = dir.appendingPathComponent("current.log")
         previousURL = dir.appendingPathComponent("previous.log")
         self.maxFileSizeBytes = maxFileSizeBytes
-        openHandle()
+        // Static rather than the isolated instance method: calling actor-isolated
+        // members from init is a warning today and an error under Swift 6.
+        fileHandle = Logger.openHandle(at: currentURL)
     }
 
     // MARK: Public API
@@ -81,10 +90,14 @@ actor Logger {
     }
 
     private func openHandle() {
-        if !FileManager.default.fileExists(atPath: currentURL.path) {
-            FileManager.default.createFile(atPath: currentURL.path, contents: nil)
+        fileHandle = Logger.openHandle(at: currentURL)
+    }
+
+    private static func openHandle(at url: URL) -> FileHandle? {
+        if !FileManager.default.fileExists(atPath: url.path) {
+            FileManager.default.createFile(atPath: url.path, contents: nil)
         }
-        fileHandle = try? FileHandle(forWritingTo: currentURL)
+        return try? FileHandle(forWritingTo: url)
     }
 
     // MARK: Setup

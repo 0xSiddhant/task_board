@@ -18,6 +18,8 @@ final class AppEnvironment: ObservableObject {
     let taskUseCases: TaskUseCases
     let networkMonitor = NetworkMonitor()
     let remote: FakeRemoteTaskService
+    /// No-op by default so the app runs with no Firebase project configured.
+    let logUploadService: LogUploadService = NoOpLogUploadService()
 
     private let stack: CoreDataStack
     private let repository: TaskRepositoryImpl

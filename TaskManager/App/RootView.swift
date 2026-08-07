@@ -16,6 +16,20 @@ struct RootView: View {
                 StatusBanner(message: environment.banner)
                 BoardView(useCases: environment.taskUseCases)
             }
+            // Navigation lives here rather than in BoardView so the board doesn't
+            // need to know about the fake backend or the upload service.
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        SettingsView(
+                            remote: environment.remote,
+                            uploadService: environment.logUploadService
+                        )
+                    } label: {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                }
+            }
         }
         .task { environment.start() }
     }
