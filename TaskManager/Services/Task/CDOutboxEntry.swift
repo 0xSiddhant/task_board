@@ -1,13 +1,5 @@
 import CoreData
 
-/// The remote operation an outbox entry replays. A move is an `update` — the
-/// remote service has no separate move call, only the changed task.
-enum OutboxOp: String {
-    case create
-    case update
-    case delete
-}
-
 @objc(CDOutboxEntry)
 final class CDOutboxEntry: NSManagedObject {
     @NSManaged var id: UUID

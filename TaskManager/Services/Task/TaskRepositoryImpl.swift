@@ -96,6 +96,71 @@ final class TaskRepositoryImpl: TaskRepository {
         return result
     }
 
+    // MARK: Sync support
+
+    func pendingOutboxEntries() -> [OutboxEntry] {
+        var result: [OutboxEntry] = []
+        context.performAndWait {
+            let request = CDOutboxEntry.typedFetchRequest()
+            request.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: true)]
+            result = ((try? context.fetch(request)) ?? []).compactMap { $0.toDomain() }
+        }
+        return result
+    }
+
+    func removeOutboxEntry(id: UUID) {
+        context.performAndWait {
+            let request = CDOutboxEntry.typedFetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+            request.fetchLimit = 1
+            guard let entry = (try? context.fetch(request))?.first else { return }
+            context.delete(entry)
+            save()
+        }
+    }
+
+    func fetchTask(id: UUID) -> Task? {
+        var result: Task?
+        context.performAndWait {
+            result = fetch(id: id)?.toDomain()
+        }
+        return result
+    }
+
+    func markSyncStatus(_ status: SyncStatus, for taskId: UUID) {
+        context.performAndWait {
+            guard let cdTask = fetch(id: taskId) else { return }
+            cdTask.syncStatus = status.rawValue
+            save()
+        }
+    }
+
+    /// No outbox entry here — this is remote state landing locally, not a local
+    /// change that needs pushing back.
+    func applyRemote(_ task: Task) {
+        context.performAndWait {
+            let cdTask = fetch(id: task.id) ?? CDTask(context: context)
+            cdTask.id = task.id
+            cdTask.title = task.title
+            cdTask.taskDescription = task.description
+            cdTask.status = task.status.rawValue
+            cdTask.position = task.position
+            cdTask.createdAt = task.createdAt
+            cdTask.updatedAt = task.updatedAt
+            cdTask.syncStatus = SyncStatus.synced.rawValue
+            cdTask.deletedAt = task.deletedAt
+            save()
+        }
+    }
+
+    func hardDelete(id: UUID) {
+        context.performAndWait {
+            guard let cdTask = fetch(id: id) else { return }
+            context.delete(cdTask)
+            save()
+        }
+    }
+
     // MARK: Outbox
 
     /// Never saves. The caller commits the task change and this entry in one
@@ -144,6 +209,21 @@ final class TaskRepositoryImpl: TaskRepository {
 }
 
 // MARK: - Mapping
+
+private extension CDOutboxEntry {
+    /// Returns nil for an unrecognized op rather than guessing — the sync engine
+    /// drops those instead of replaying something it can't interpret.
+    func toDomain() -> OutboxEntry? {
+        guard let op = OutboxOp(rawValue: op) else { return nil }
+        return OutboxEntry(
+            id: id,
+            op: op,
+            taskId: taskId,
+            baseUpdatedAt: baseUpdatedAt,
+            createdAt: createdAt
+        )
+    }
+}
 
 private extension CDTask {
     func toDomain() -> Task {
