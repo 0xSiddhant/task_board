@@ -8,9 +8,7 @@
 import Combine
 import Foundation
 
-/// Composition root. Owns the object graph and the one place that decides which
-/// banner is showing — that decision deliberately lives here rather than inside
-/// StatusBanner, which stays pure presentation.
+/// Composition root, and the single place that decides which banner is showing.
 @MainActor
 final class AppEnvironment: ObservableObject {
     @Published private(set) var banner: BannerMessage?
@@ -35,11 +33,9 @@ final class AppEnvironment: ObservableObject {
         taskUseCases = TaskUseCases(repository: repository)
         syncEngine = SyncEngine(repository: repository, remote: remote)
 
-        // dropFirst so the initial `.online` value at launch doesn't fire the
-        // "back online" banner at someone who never went offline.
-        networkMonitor.$status
-            .dropFirst()
-            .removeDuplicates()
+        // statusChanges rather than $status: it only fires for fluctuations during
+        // the session, so opening the app with no connection shows nothing.
+        networkMonitor.statusChanges
             .sink { [weak self] status in
                 self?.connectivityChanged(to: status)
             }
@@ -58,9 +54,8 @@ final class AppEnvironment: ObservableObject {
             show(.offline)
 
         case .online:
-            // Reconnecting almost always triggers a sync, so showing "back
-            // online" and then "all synced" a moment later reads as a flicker.
-            // Whether anything was queued at this instant decides which one wins.
+            // Reconnecting triggers a sync, so showing "back online" and then
+            // "all synced" a moment later reads as a flicker. Only one fires.
             let hadPendingWork = !repository.pendingOutboxEntries().isEmpty
             if !hadPendingWork { show(.backOnline) }
 

@@ -17,8 +17,8 @@ final class BoardViewModel: ObservableObject {
 
     init(useCases: TaskUseCases) {
         self.useCases = useCases
-        // Driven by the store, not by return values from the use cases below —
-        // that's what keeps the board correct when SyncEngine writes behind us.
+        // Driven by the store rather than by use-case return values, so the board
+        // stays correct when the sync engine writes behind us.
         cancellable = useCases.observeTasks()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] tasks in
@@ -30,9 +30,8 @@ final class BoardViewModel: ObservableObject {
         tasksByStatus[status] ?? []
     }
 
-    /// `index` is the slot the card should land in within `status`, after the
-    /// dragged card has been taken out of the picture. The neighbors on either
-    /// side of that slot give the use case its fractional position.
+    /// `index` is the slot to land in, counted with the dragged card already
+    /// removed from the column.
     func move(_ task: Task, to status: TaskStatus, insertingAt index: Int) {
         let column = tasks(in: status).filter { $0.id != task.id }
         let clamped = min(max(index, 0), column.count)

@@ -40,8 +40,8 @@ struct TaskColumnView: View {
                         }
                     }
 
-                    // Trailing catch-all: dropping below the last card appends to
-                    // the end. Min height keeps an empty column droppable.
+                    // Dropping below the last card appends. The min height is what
+                    // keeps an empty column droppable.
                     Color.clear
                         .frame(minHeight: 60)
                         .contentShape(Rectangle())
@@ -72,7 +72,6 @@ struct TaskColumnView: View {
         .animation(.default, value: tasks.count)
     }
 
-    /// A branch here rather than its own file — it's one line of copy, not a screen.
     private var emptyState: some View {
         Text("Nothing here yet")
             .font(.caption)
@@ -83,8 +82,7 @@ struct TaskColumnView: View {
 
     private func card(_ task: Task, at index: Int) -> some View {
         TaskCardView(task: task)
-            // Keyed on the task id so a card crossing columns travels there
-            // instead of vanishing on one side and appearing on the other.
+            // Keyed on the task id so a card crossing columns travels there.
             .matchedGeometryEffect(id: task.id, in: namespace)
             .contentShape(Rectangle())
             .onTapGesture { onSelect(task) }
@@ -94,8 +92,8 @@ struct TaskColumnView: View {
                 }
             }
             .draggable(task.id.uuidString)
-            // Each card is its own drop target, inserting above itself. Cheaper
-            // and steadier than deriving an index from raw drop coordinates.
+            // Each card is its own drop target, inserting above itself — steadier
+            // than deriving an index from raw drop coordinates.
             .dropDestination(for: String.self) { items, _ in
                 handleDrop(items, at: index)
             }

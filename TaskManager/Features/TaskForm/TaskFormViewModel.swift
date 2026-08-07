@@ -8,9 +8,7 @@
 import Combine
 import Foundation
 
-/// One view model for both modes. A non-nil `task` means edit — it prefills the
-/// fields and routes submit to `update`; nil means create. Splitting this in two
-/// would duplicate the field handling for the sake of one branch.
+/// A non-nil `task` means edit and routes submit to `update`; nil means create.
 @MainActor
 final class TaskFormViewModel: ObservableObject {
     @Published var title: String
@@ -34,8 +32,8 @@ final class TaskFormViewModel: ObservableObject {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// The only method that touches the repository — dismissing the sheet never
-    /// calls it, so a cancelled edit leaves no trace in the outbox.
+    /// The only method that touches the repository, so a cancelled edit leaves
+    /// no trace in the outbox.
     func submit() {
         guard canSubmit else { return }
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)

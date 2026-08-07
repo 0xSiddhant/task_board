@@ -11,25 +11,28 @@ struct RootView: View {
     @StateObject private var environment = AppEnvironment()
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                StatusBanner(message: environment.banner)
+        ZStack(alignment: .top) {
+            NavigationStack {
                 BoardView(useCases: environment.taskUseCases)
-            }
-            // Navigation lives here rather than in BoardView so the board doesn't
-            // need to know about the fake backend or the upload service.
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink {
-                        SettingsView(
-                            remote: environment.remote,
-                            uploadService: environment.logUploadService
-                        )
-                    } label: {
-                        Label("Settings", systemImage: "gearshape")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            NavigationLink {
+                                SettingsView(
+                                    remote: environment.remote,
+                                    uploadService: environment.logUploadService
+                                )
+                            } label: {
+                                Label("Settings", systemImage: "gearshape")
+                            }
+                        }
                     }
-                }
             }
+
+            // Layered over the stack, not stacked above it: as a sibling in the
+            // layout it pushes the board down and tints the navigation bar.
+            StatusBanner(message: environment.banner)
+                .allowsHitTesting(false)
+                .zIndex(1)
         }
         .task { environment.start() }
     }

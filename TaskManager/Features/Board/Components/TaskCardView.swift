@@ -51,8 +51,6 @@ struct TaskCardView: View {
                 Image(systemName: task.syncStatus.symbolName)
                     .font(.caption)
                     .foregroundStyle(task.syncStatus.tint)
-                    // Morphs between states instead of popping, so a card going
-                    // pending → synced reads as one object changing.
                     .contentTransition(.symbolEffect(.replace))
                     .accessibilityLabel(task.syncStatus.accessibilityLabel)
             }

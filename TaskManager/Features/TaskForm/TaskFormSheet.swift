@@ -7,9 +7,8 @@
 
 import SwiftUI
 
-/// What the board is presenting. Identifiable so `.sheet(item:)` can drive it,
-/// with the task id as identity so switching directly from one card to another
-/// rebuilds the form instead of reusing stale fields.
+/// Identity is the task id, so moving straight from one card to another rebuilds
+/// the form instead of reusing the previous card's fields.
 enum TaskFormMode: Identifiable {
     case create
     case edit(Task)

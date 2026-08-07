@@ -27,8 +27,8 @@ final class SettingsViewModel: ObservableObject {
     private let uploadService: LogUploadService
 
     private var cancellables = Set<AnyCancellable>()
-    /// Set while `load()` seeds the published values from the actor, so pulling
-    /// state in doesn't immediately push the same values back out.
+    /// Set while `load()` seeds these values, so pulling state in doesn't
+    /// immediately push it back out.
     private var isLoading = false
 
     init(remote: FakeRemoteTaskService, uploadService: LogUploadService) {
@@ -60,8 +60,6 @@ final class SettingsViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
-    /// Reads the knobs back out of the actor so the screen opens showing what's
-    /// actually in effect rather than the defaults.
     func load() async {
         isLoading = true
         forceOffline = await remote.forceOffline
@@ -78,7 +76,7 @@ final class SettingsViewModel: ObservableObject {
         let data = await Logger.shared.exportData()
         do {
             try await uploadService.upload(logData: data, metadata: .current())
-            // Only here — resetting before a confirmed upload would discard logs
+            // Only after a confirmed upload — resetting earlier discards logs
             // that never made it anywhere.
             await Logger.shared.reset()
             uploadState = .success
