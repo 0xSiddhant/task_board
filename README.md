@@ -4,15 +4,35 @@ A task manager with three columns — To Do, In Progress, Done — built to
 stay fully usable without a network connection and sync changes once one
 is available.
 
+## Setup
+
+Requires Xcode 26 or newer, iOS 17 or newer.
+
+Open `TaskManager.xcodeproj`, build, and run. No configuration needed —
+the app ships with an in-memory fake backend.
+
+### Optional: Firebase
+
+1. Register an iOS app in the Firebase console using this project's
+   bundle identifier.
+2. Add `GoogleService-Info.plist` to `TaskManager/`, the folder holding
+   `TaskManagerApp.swift`. The file is gitignored; without it the app
+   uses the fake backend.
+3. **File → Add Package Dependencies…** →
+   `https://github.com/firebase/firebase-ios-sdk`. Add `FirebaseCore`,
+   `FirebaseFirestore`, and `FirebaseStorage` to the TaskManager target.
+
 ## Architecture
 
 The app is split into four areas:
 
 - **Features** — one folder per screen (Board, TaskForm, Settings), each
   holding its View and ViewModel together.
-- **Services** — grouped by subsystem: `Task` (domain model, repository,
-  use cases, Core Data), `Sync` (remote service, sync engine), `Logging`
-  (logger, log upload).
+- **Services** — grouped by subsystem: `Task`, `Sync` (remote service,
+  sync engine), and `Logging` (logger, log upload). `Task` splits again
+  into `Model` (domain types and the repository protocol) and
+  `Persistence` (the Core Data stack, managed objects, and the repository
+  implementation), with `TaskUseCases` sitting above both.
 - **Support** — cross-cutting utilities that don't belong to one feature,
   like the network monitor.
 - **Components** — UI shared across more than one feature, like the

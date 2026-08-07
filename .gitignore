@@ -29,7 +29,10 @@ xcuserdata/
 .build/
 .swiftpm/
 Packages/
-Package.resolved
+
+# Firebase — tied to whoever's Firebase project it is, and the app falls back
+# to its fake backend without it
+GoogleService-Info.plist
 
 # CocoaPods
 Pods/
