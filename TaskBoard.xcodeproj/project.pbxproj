@@ -37,9 +37,27 @@
 			);
 			target = 9CF4146930266135000F7633 /* TaskBoard */;
 		};
+		9C4F5E873026E9FB0080861D /* Exceptions for "Screenshots" folder in "TaskBoardTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"board-drag-landscape.png",
+				board.png,
+				"new-task.png",
+				settings.png,
+			);
+			target = 9CF4147B30266138000F7633 /* TaskBoardTests */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		9C4F5E7B3026E75C0080861D /* Screenshots */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				9C4F5E873026E9FB0080861D /* Exceptions for "Screenshots" folder in "TaskBoardTests" target */,
+			);
+			path = Screenshots;
+			sourceTree = "<group>";
+		};
 		9CF4146C30266135000F7633 /* TaskBoard */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -90,6 +108,7 @@
 				9CF4149930266322000F7633 /* README.md */,
 				9CF4146C30266135000F7633 /* TaskBoard */,
 				9CF4147F30266138000F7633 /* TaskBoardTests */,
+				9C4F5E7B3026E75C0080861D /* Screenshots */,
 				9C4F5D453026B1D50080861D /* Frameworks */,
 				9CF4146B30266135000F7633 /* Products */,
 			);
@@ -148,6 +167,7 @@
 				9CF4147E30266138000F7633 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
+				9C4F5E7B3026E75C0080861D /* Screenshots */,
 				9CF4147F30266138000F7633 /* TaskBoardTests */,
 			);
 			name = TaskBoardTests;
