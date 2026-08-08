@@ -7,6 +7,7 @@
 
 import Combine
 import Foundation
+import UIKit
 
 /// Composition root, and the single place that decides which banner is showing.
 @MainActor
@@ -61,8 +62,29 @@ final class AppEnvironment: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // This does fire during launch as well as on a real foreground, so it
+        // overlaps the sync `start()` kicks off. SyncEngine drops the duplicate.
+        NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+            .sink { [weak self] _ in
+                Logger.record("Returned to foreground, syncing")
+                _Concurrency.Task { await self?.syncNow() }
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+            .sink { _ in
+                BackgroundSync.schedule()
+            }
+            .store(in: &cancellables)
+
         let reporter = Self.makeCrashReporter(usesFirebase: usesFirebase)
         _Concurrency.Task { await Logger.shared.attach(crashReporter: reporter) }
+    }
+
+    /// The one entry point for a sync from outside — used by the foreground
+    /// observer and by the background task handler.
+    func syncNow() async {
+        await syncEngine.sync()
     }
 
     private static func makeCrashReporter(usesFirebase: Bool) -> CrashReporter {

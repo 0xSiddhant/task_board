@@ -28,8 +28,8 @@ protocol TaskRepository {
     /// Includes soft-deleted rows; sync still needs the row a delete refers to.
     func fetchTask(id: UUID) -> Task?
     func markSyncStatus(_ status: SyncStatus, for taskId: UUID)
-    /// Applies remote state locally, marked `.synced`. Inserts if absent.
+    /// Applies remote state locally, marked `.synced`. Inserts if absent, and
+    /// carries `deletedAt` across, which is how a tombstone from another device
+    /// removes a task from this one's board.
     func applyRemote(_ task: Task)
-    /// Removes the row for real, after a confirmed remote ack.
-    func hardDelete(id: UUID)
 }

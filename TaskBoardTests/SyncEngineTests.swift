@@ -175,7 +175,7 @@ struct SyncEngineTests {
 
     // MARK: Delete
 
-    @Test func deleteHardDeletesOnlyAfterTheRemoteAcknowledges() async {
+    @Test func deletePushesATombstoneOnlyAfterTheRemoteAcknowledges() async {
         let (engine, repository, remote) = makeSubject()
         repository.now = { self.base }
 
@@ -191,12 +191,15 @@ struct SyncEngineTests {
 
         #expect(repository.fetchTask(id: created.id) != nil)
         #expect(repository.pendingOutboxEntries().count == 1)
+        #expect(await remote.serverTasks[created.id]?.deletedAt == nil)   // not yet a tombstone
 
         await engine.sync()
 
-        #expect(repository.fetchTask(id: created.id) == nil)
         #expect(repository.pendingOutboxEntries().isEmpty)
-        #expect(await remote.serverTasks.isEmpty)
+        #expect(repository.fetchTasks(status: nil).isEmpty)   // gone from the board
+        // The record survives on the server carrying deletedAt — that is what lets
+        // another device find out about the deletion at all.
+        #expect(await remote.serverTasks[created.id]?.deletedAt != nil)
     }
 
     // MARK: Timeouts
@@ -253,6 +256,27 @@ struct SyncEngineTests {
 
         #expect(repository.pendingOutboxEntries().isEmpty)
         #expect(repository.fetchTask(id: created.id)?.syncStatus == .synced)
+    }
+
+    /// The case tombstones exist for: another device deleted a task this one still
+    /// has locally, with no queued write of its own.
+    @Test func aTombstoneFromAnotherDeviceRemovesTheTaskFromThisBoard() async {
+        let (engine, repository, remote) = makeSubject()
+        repository.now = { self.base }
+
+        let shared = task(title: "shared", updatedAt: base, syncStatus: .synced)
+        repository.seed(shared)
+        #expect(repository.fetchTasks(status: nil).count == 1)
+
+        var deletedElsewhere = shared
+        deletedElsewhere.deletedAt = base.addingTimeInterval(60)
+        deletedElsewhere.updatedAt = base.addingTimeInterval(60)
+        await remote.seed([deletedElsewhere])
+
+        await engine.sync()
+
+        #expect(repository.fetchTasks(status: nil).isEmpty)
+        #expect(repository.fetchTask(id: shared.id)?.deletedAt != nil)
     }
 
     // MARK: hasConflict

@@ -11,7 +11,7 @@ protocol RemoteTaskService: Sendable {
     func fetchTasks() async throws -> [Task]
     func create(_ task: Task) async throws
     func update(_ task: Task) async throws
-    func delete(id: UUID) async throws
+    func delete(_ task: Task) async throws
 }
 
 enum RemoteError: Error {

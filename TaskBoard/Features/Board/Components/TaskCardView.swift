@@ -25,19 +25,6 @@ extension TaskStatus {
     }
 }
 
-extension SyncStatus {
-    /// nil when synced — the resting state is the boring one, and a permanent
-    /// green tick next to a task-status tick is what made the card ambiguous.
-    var badge: (symbolName: String, tint: Color, label: String)? {
-        switch self {
-        case .synced: return nil
-        case .pending: return ("clock", .orange, "Waiting to sync")
-        case .syncing: return ("arrow.triangle.2.circlepath", .blue, "Syncing")
-        case .failed: return ("exclamationmark.triangle.fill", .red, "Sync failed")
-        }
-    }
-}
-
 struct TaskCardView: View {
     let task: Task
     var isLifted = false
@@ -68,14 +55,6 @@ struct TaskCardView: View {
 
             Spacer(minLength: 4)
 
-            if let badge = task.syncStatus.badge {
-                Image(systemName: badge.symbolName)
-                    .font(.caption)
-                    .foregroundStyle(badge.tint)
-                    .contentTransition(.symbolEffect(.replace))
-                    .accessibilityLabel(badge.label)
-            }
-
             dragHandle
         }
         .padding(12)
@@ -92,7 +71,6 @@ struct TaskCardView: View {
         .scaleEffect(isLifted ? 1.03 : 1)
         .animation(.smooth(duration: 0.25), value: isLifted)
         .animation(.smooth(duration: 0.25), value: task.status)
-        .animation(.smooth(duration: 0.25), value: task.syncStatus)
     }
 
     private var dragHandle: some View {

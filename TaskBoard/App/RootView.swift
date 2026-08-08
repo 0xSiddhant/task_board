@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct RootView: View {
-    @StateObject private var environment = AppEnvironment()
+    @ObservedObject var environment: AppEnvironment
 
     var body: some View {
         ZStack(alignment: .top) {

@@ -32,4 +32,14 @@ struct Task: Identifiable, Equatable {
     var updatedAt: Date
     var syncStatus: SyncStatus
     var deletedAt: Date?
+
+    /// The form a deleted task takes on the wire. Both backends write this rather
+    /// than removing the record, so other devices can tell a deletion apart from
+    /// a task they've simply never seen.
+    var tombstone: Task {
+        guard deletedAt == nil else { return self }
+        var copy = self
+        copy.deletedAt = Date()
+        return copy
+    }
 }

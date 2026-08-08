@@ -65,9 +65,9 @@ actor MockRemoteTaskService: RemoteTaskService {
         serverTasks[task.id] = task
     }
 
-    func delete(id: UUID) async throws {
+    func delete(_ task: Task) async throws {
         try await record(.delete)
-        serverTasks[id] = nil
+        serverTasks[task.id] = task.tombstone
     }
 
     /// Logs the attempt before stalling or throwing, so a call that never

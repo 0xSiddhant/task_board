@@ -51,9 +51,9 @@ actor FakeRemoteTaskService: RemoteTaskService, RemoteTaskDebugControls {
         storage[task.id] = task
     }
 
-    func delete(id: UUID) async throws {
+    func delete(_ task: Task) async throws {
         try await simulateRoundTrip()
-        storage[id] = nil
+        storage[task.id] = task.tombstone
     }
 
     // MARK: Simulation

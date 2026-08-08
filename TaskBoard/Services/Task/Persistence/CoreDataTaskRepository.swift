@@ -186,14 +186,6 @@ final class CoreDataTaskRepository: NSObject, TaskRepository {
         }
     }
 
-    func hardDelete(id: UUID) {
-        context.performAndWait {
-            guard let cdTask = fetch(id: id) else { return }
-            context.delete(cdTask)
-            save()
-        }
-    }
-
     // MARK: Outbox
 
     /// Never saves. The caller commits the task change and this entry in one

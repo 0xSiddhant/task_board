@@ -15,6 +15,7 @@ actor SyncEngine {
     private let repository: TaskRepository
     private let remote: RemoteTaskService
     private let timeout: TimeInterval
+    private var isSyncing = false
 
     /// Firestore retries a rejected write stream indefinitely rather than
     /// erroring, so a misconfigured backend hangs `sync()` forever and the queue
@@ -45,7 +46,15 @@ actor SyncEngine {
 
     /// Pull, diff, resolve, push. Resolving before pushing is the point: it stops
     /// a write that was already superseded from going up.
+    ///
+    /// Overlapping calls are dropped rather than queued. Launch, foreground, and
+    /// background fetch can all fire within the same moment, and two passes over
+    /// one outbox would race each other to drain the same entries.
     func sync() async {
+        guard !isSyncing else { return }
+        isSyncing = true
+        defer { isSyncing = false }
+
         let remoteTasks: [Task]
         do {
             let remote = self.remote
@@ -113,7 +122,7 @@ actor SyncEngine {
                 switch entry.op {
                 case .create: try await withTimeout { try await remote.create(task) }
                 case .update: try await withTimeout { try await remote.update(task) }
-                case .delete: try await withTimeout { try await remote.delete(id: task.id) }
+                case .delete: try await withTimeout { try await remote.delete(task) }
                 }
             } catch {
                 repository.markSyncStatus(.failed, for: entry.taskId)
@@ -121,13 +130,10 @@ actor SyncEngine {
                 return
             }
 
-            // Only after the remote confirmed: a hard delete before the ack loses
-            // the operation if the push failed.
-            if entry.op == .delete {
-                repository.hardDelete(id: task.id)
-            } else {
-                repository.markSyncStatus(.synced, for: task.id)
-            }
+            // A deleted task keeps its soft-deleted row rather than being erased.
+            // The server now holds a tombstone, so erasing locally only means the
+            // next pull recreates the row from it.
+            repository.markSyncStatus(.synced, for: task.id)
             repository.removeOutboxEntry(id: entry.id)
         }
     }

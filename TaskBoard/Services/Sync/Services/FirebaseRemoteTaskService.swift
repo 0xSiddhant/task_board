@@ -40,8 +40,8 @@ actor FirebaseRemoteTaskService: RemoteTaskService {
         try await collection.document(task.id.uuidString).setData(task.firestoreData, merge: true)
     }
 
-    func delete(id: UUID) async throws {
-        try await collection.document(id.uuidString).delete()
+    func delete(_ task: Task) async throws {
+        try await collection.document(task.id.uuidString).setData(task.tombstone.firestoreData)
     }
 }
 

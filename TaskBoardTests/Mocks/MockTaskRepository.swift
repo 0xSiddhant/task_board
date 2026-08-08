@@ -11,7 +11,7 @@ import Foundation
 
 /// In-memory stand-in for `CoreDataTaskRepository`, mirroring its outbox semantics:
 /// every mutation queues exactly one entry carrying the pre-mutation
-/// `updatedAt`, and deletes are soft until `hardDelete`.
+/// `updatedAt`, and deletes are soft — the row survives as a tombstone.
 final class MockTaskRepository: TaskRepository {
     private(set) var storage: [UUID: Task] = [:]
     private(set) var outbox: [OutboxEntry] = []
@@ -130,11 +130,6 @@ final class MockTaskRepository: TaskRepository {
         var incoming = task
         incoming.syncStatus = .synced
         storage[task.id] = incoming
-        publish()
-    }
-
-    func hardDelete(id: UUID) {
-        storage[id] = nil
         publish()
     }
 

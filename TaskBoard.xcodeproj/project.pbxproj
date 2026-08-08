@@ -29,9 +29,22 @@
 		9CF4149930266322000F7633 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		9C4F5E6B3026C2870080861D /* Exceptions for "TaskBoard" folder in "TaskBoard" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 9CF4146930266135000F7633 /* TaskBoard */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		9CF4146C30266135000F7633 /* TaskBoard */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				9C4F5E6B3026C2870080861D /* Exceptions for "TaskBoard" folder in "TaskBoard" target */,
+			);
 			path = TaskBoard;
 			sourceTree = "<group>";
 		};
@@ -381,6 +394,7 @@
 				DEVELOPMENT_TEAM = 2A7GLY3DP4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TaskBoard/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -414,6 +428,7 @@
 				DEVELOPMENT_TEAM = 2A7GLY3DP4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TaskBoard/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
