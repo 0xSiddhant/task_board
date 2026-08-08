@@ -1,6 +1,6 @@
-# Offline-First Task Manager
+# Offline-First Task Board
 
-A task manager with three columns — To Do, In Progress, Done — built to
+A task board with three columns — To Do, In Progress, Done — built to
 stay fully usable without a network connection and sync changes once one
 is available.
 
@@ -8,19 +8,19 @@ is available.
 
 Requires Xcode 26 or newer, iOS 17 or newer.
 
-Open `TaskManager.xcodeproj`, build, and run. No configuration needed —
+Open `TaskBoard.xcodeproj`, build, and run. No configuration needed —
 the app ships with an in-memory fake backend.
 
 ### Optional: Firebase
 
 1. Register an iOS app in the Firebase console using this project's
    bundle identifier.
-2. Add `GoogleService-Info.plist` to `TaskManager/`, the folder holding
-   `TaskManagerApp.swift`. The file is gitignored; without it the app
+2. Add `GoogleService-Info.plist` to `TaskBoard/`, the folder holding
+   `TaskBoardApp.swift`. The file is gitignored; without it the app
    uses the fake backend.
 3. **File → Add Package Dependencies…** →
    `https://github.com/firebase/firebase-ios-sdk`. Add `FirebaseCore`,
-   `FirebaseFirestore`, and `FirebaseStorage` to the TaskManager target.
+   `FirebaseFirestore`, and `FirebaseStorage` to the TaskBoard target.
 
 ## Architecture
 
