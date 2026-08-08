@@ -22,6 +22,7 @@ final class AppEnvironment: ObservableObject {
     let remoteDebugControls: RemoteTaskDebugControls?
     let logUploadService: LogUploadService
 
+    private let backendName: String
     private let stack: CoreDataStack
     private let repository: CoreDataTaskRepository
     private let syncEngine: SyncEngine
@@ -35,21 +36,21 @@ final class AppEnvironment: ObservableObject {
         taskUseCases = TaskUseCases(repository: repository)
 
         let usesFirebase = FirebaseBootstrap.isConfigured
+        backendName = usesFirebase ? "Firebase" : "in-memory fake"
 
+        let backend: RemoteTaskService
         #if canImport(FirebaseFirestore)
-        if usesFirebase {
-            remote = FirebaseRemoteTaskService()
-            remoteDebugControls = nil   // a real backend has no fault-injection knobs
-        } else {
-            let fake = FakeRemoteTaskService()
-            remote = fake
-            remoteDebugControls = fake
-        }
+        backend = usesFirebase ? FirebaseRemoteTaskService() : FakeRemoteTaskService()
         #else
-        let fake = FakeRemoteTaskService()
-        remote = fake
-        remoteDebugControls = fake
+        backend = FakeRemoteTaskService()
         #endif
+
+        let simulated = SimulatedFaultsRemoteService(
+            wrapping: backend,
+            simulatedLatency: usesFirebase ? 0 : 0.3
+        )
+        remote = simulated
+        remoteDebugControls = simulated
 
         logUploadService = usesFirebase ? FirebaseLogUploadService() : NoOpLogUploadService()
         syncEngine = SyncEngine(repository: repository, remote: remote)
@@ -95,7 +96,7 @@ final class AppEnvironment: ObservableObject {
     }
 
     func start() {
-        Logger.record("App started, backend: \(remoteDebugControls == nil ? "Firebase" : "in-memory fake")")
+        Logger.record("App started, backend: \(backendName)")
         _Concurrency.Task { await syncEngine.sync() }
     }
 

@@ -19,7 +19,8 @@ struct RootView: View {
                             NavigationLink {
                                 SettingsView(
                                     controls: environment.remoteDebugControls,
-                                    uploadService: environment.logUploadService
+                                    uploadService: environment.logUploadService,
+                                    sync: { await environment.syncNow() }
                                 )
                             } label: {
                                 Label("Settings", systemImage: "gearshape")

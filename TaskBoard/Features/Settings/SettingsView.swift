@@ -10,14 +10,39 @@ import SwiftUI
 struct SettingsView: View {
     @StateObject private var viewModel: SettingsViewModel
 
-    init(controls: RemoteTaskDebugControls?, uploadService: LogUploadService) {
+    init(
+        controls: RemoteTaskDebugControls?,
+        uploadService: LogUploadService,
+        sync: @escaping @Sendable () async -> Void
+    ) {
         _viewModel = StateObject(
-            wrappedValue: SettingsViewModel(controls: controls, uploadService: uploadService)
+            wrappedValue: SettingsViewModel(
+                controls: controls,
+                uploadService: uploadService,
+                sync: sync
+            )
         )
     }
 
     var body: some View {
         Form {
+            Section {
+                Button {
+                    _Concurrency.Task { await viewModel.syncNow() }
+                } label: {
+                    HStack {
+                        Text("Sync now")
+                        Spacer()
+                        syncStatus
+                    }
+                }
+                .disabled(viewModel.syncState == .syncing)
+            } header: {
+                Text("Sync")
+            } footer: {
+                Text("Otherwise syncing happens at launch, on reconnect, and via background refresh.")
+            }
+
             if viewModel.canConfigureBackend {
                 Section {
                     Toggle("Force offline", isOn: $viewModel.forceOffline)
@@ -32,9 +57,9 @@ struct SettingsView: View {
                         Slider(value: $viewModel.simulatedLatency, in: 0...3, step: 0.1)
                     }
                 } header: {
-                    Text("Fake Backend")
+                    Text("Network Simulation")
                 } footer: {
-                    Text("Applies to the next sync attempt.")
+                    Text("Injected in front of whichever backend is active, real or fake. Applies to the next sync attempt.")
                 }
             }
 
@@ -60,6 +85,20 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.load() }
+    }
+
+    @ViewBuilder
+    private var syncStatus: some View {
+        switch viewModel.syncState {
+        case .idle:
+            EmptyView()
+        case .syncing:
+            ProgressView()
+        case .finished:
+            Image(systemName: "checkmark.circle")
+                .foregroundStyle(.green)
+                .contentTransition(.symbolEffect(.replace))
+        }
     }
 
     @ViewBuilder

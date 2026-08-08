@@ -23,8 +23,17 @@ final class SettingsViewModel: ObservableObject {
 
     @Published private(set) var uploadState: UploadState = .idle
 
+    enum SyncState: Equatable {
+        case idle
+        case syncing
+        case finished
+    }
+
+    @Published private(set) var syncState: SyncState = .idle
+
     private let controls: RemoteTaskDebugControls?
     private let uploadService: LogUploadService
+    private let sync: @Sendable () async -> Void
 
     private var cancellables = Set<AnyCancellable>()
     /// Set while `load()` seeds these values, so pulling state in doesn't
@@ -34,9 +43,14 @@ final class SettingsViewModel: ObservableObject {
     /// `controls` is nil against a real backend, which has no knobs to expose.
     var canConfigureBackend: Bool { controls != nil }
 
-    init(controls: RemoteTaskDebugControls?, uploadService: LogUploadService) {
+    init(
+        controls: RemoteTaskDebugControls?,
+        uploadService: LogUploadService,
+        sync: @escaping @Sendable () async -> Void
+    ) {
         self.controls = controls
         self.uploadService = uploadService
+        self.sync = sync
 
         $forceOffline
             .dropFirst()
@@ -70,6 +84,14 @@ final class SettingsViewModel: ObservableObject {
         failureRate = settings.failureRate
         simulatedLatency = settings.simulatedLatency
         isLoading = false
+    }
+
+    /// Otherwise a sync only happens at launch, on reconnect, or via background
+    /// refresh — none of which are things you can trigger while testing.
+    func syncNow() async {
+        syncState = .syncing
+        await sync()
+        syncState = .finished
     }
 
     // MARK: Log upload
