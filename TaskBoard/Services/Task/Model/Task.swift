@@ -7,13 +7,13 @@
 
 import Foundation
 
-enum TaskStatus: String, CaseIterable {
+nonisolated enum TaskStatus: String, CaseIterable {
     case todo
     case inProgress
     case done
 }
 
-enum SyncStatus: String {
+nonisolated enum SyncStatus: String {
     case pending
     case syncing
     case synced
@@ -22,7 +22,7 @@ enum SyncStatus: String {
 
 /// Deliberately free of Core Data: everything above the repository uses this
 /// type, so use cases and ViewModels stay testable without a store.
-struct Task: Identifiable, Equatable {
+nonisolated struct Task: Identifiable, Equatable {
     let id: UUID
     var title: String
     var description: String

@@ -50,7 +50,7 @@ actor FirebaseRemoteTaskService: RemoteTaskService {
 // Lives here rather than on `Task`, for the same reason the Core Data mapping
 // lives in the repository: the domain type stays free of its storage.
 
-private extension Task {
+private nonisolated extension Task {
     /// `syncStatus` is deliberately absent — it describes this device's progress
     /// pushing the task, and means nothing to another client.
     var firestoreData: [String: Any] {

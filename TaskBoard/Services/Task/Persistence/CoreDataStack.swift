@@ -1,6 +1,6 @@
 import CoreData
 
-final class CoreDataStack {
+nonisolated final class CoreDataStack {
     let container: NSPersistentContainer
 
     var viewContext: NSManagedObjectContext { container.viewContext }

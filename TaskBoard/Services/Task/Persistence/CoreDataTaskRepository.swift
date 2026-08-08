@@ -1,14 +1,19 @@
 import Combine
 import CoreData
 
-final class CoreDataTaskRepository: NSObject, TaskRepository {
+// @unchecked because the compiler can't see the invariant that holds it
+// together: every access to `subject` and `controller` happens inside
+// `context.performAndWait`, so the context's private queue serialises them.
+nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unchecked Sendable {
     private let context: NSManagedObjectContext
 
     private let subject = CurrentValueSubject<[Task], Never>([])
     private var controller: NSFetchedResultsController<CDTask>?
 
     init(stack: CoreDataStack) {
-        self.context = stack.viewContext
+        // A private-queue context, not viewContext: every read and write here
+        // then runs off the main thread, and merges into the UI context.
+        self.context = stack.newBackgroundContext()
         super.init()
     }
 
@@ -232,15 +237,15 @@ final class CoreDataTaskRepository: NSObject, TaskRepository {
 
 // MARK: - Live updates
 
-extension CoreDataTaskRepository: NSFetchedResultsControllerDelegate {
-    func controllerDidChangeContent(_ controller: NSFetchedResultsController<NSFetchRequestResult>) {
+nonisolated extension CoreDataTaskRepository: NSFetchedResultsControllerDelegate {
+    nonisolated func controllerDidChangeContent(_ controller: NSFetchedResultsController<NSFetchRequestResult>) {
         publishCurrent()
     }
 }
 
 // MARK: - Mapping
 
-private extension CDOutboxEntry {
+private nonisolated extension CDOutboxEntry {
     /// nil for an unrecognized op, so the sync engine drops it rather than
     /// replaying something it can't interpret.
     func toDomain() -> OutboxEntry? {
@@ -255,7 +260,7 @@ private extension CDOutboxEntry {
     }
 }
 
-private extension CDTask {
+private nonisolated extension CDTask {
     func toDomain() -> Task {
         Task(
             id: id,

@@ -10,7 +10,7 @@ import Foundation
 import FirebaseCrashlytics
 #endif
 
-protocol CrashReporter: Sendable {
+nonisolated protocol CrashReporter: Sendable {
     /// Context carried into the next crash report.
     func breadcrumb(_ message: String)
     /// A handled failure worth reporting without crashing the app.
@@ -18,13 +18,13 @@ protocol CrashReporter: Sendable {
 }
 
 /// The default, so the app runs with no Firebase project configured.
-struct NoOpCrashReporter: CrashReporter {
+nonisolated struct NoOpCrashReporter: CrashReporter {
     func breadcrumb(_ message: String) {}
     func record(_ message: String) {}
 }
 
 #if canImport(FirebaseCrashlytics)
-struct FirebaseCrashReporter: CrashReporter {
+nonisolated struct FirebaseCrashReporter: CrashReporter {
     func breadcrumb(_ message: String) {
         Crashlytics.crashlytics().log(message)
     }

@@ -8,7 +8,7 @@
 import BackgroundTasks
 import Foundation
 
-enum BackgroundSync {
+nonisolated enum BackgroundSync {
     /// Must match BGTaskSchedulerPermittedIdentifiers in Info.plist, or
     /// registration traps at launch.
     static let identifier = "com.siddhant.TaskBoard.sync"

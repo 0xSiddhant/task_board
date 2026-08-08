@@ -1,7 +1,7 @@
 import CoreData
 
 @objc(CDOutboxEntry)
-final class CDOutboxEntry: NSManagedObject {
+nonisolated final class CDOutboxEntry: NSManagedObject {
     @NSManaged var id: UUID
     @NSManaged var op: String
     @NSManaged var taskId: UUID
@@ -11,7 +11,7 @@ final class CDOutboxEntry: NSManagedObject {
     @NSManaged var createdAt: Date
 }
 
-extension CDOutboxEntry {
+nonisolated extension CDOutboxEntry {
     @nonobjc static func typedFetchRequest() -> NSFetchRequest<CDOutboxEntry> {
         NSFetchRequest<CDOutboxEntry>(entityName: "CDOutboxEntry")
     }

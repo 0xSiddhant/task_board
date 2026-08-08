@@ -1,7 +1,7 @@
 import CoreData
 
 @objc(CDTask)
-final class CDTask: NSManagedObject {
+nonisolated final class CDTask: NSManagedObject {
     @NSManaged var id: UUID
     @NSManaged var title: String
     @NSManaged var taskDescription: String
@@ -13,7 +13,7 @@ final class CDTask: NSManagedObject {
     @NSManaged var deletedAt: Date?
 }
 
-extension CDTask {
+nonisolated extension CDTask {
     @nonobjc static func typedFetchRequest() -> NSFetchRequest<CDTask> {
         NSFetchRequest<CDTask>(entityName: "CDTask")
     }

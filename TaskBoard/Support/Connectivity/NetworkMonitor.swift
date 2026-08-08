@@ -33,7 +33,7 @@ final class NetworkMonitor: ObservableObject {
     init() {
         monitor.pathUpdateHandler = { [weak self] path in
             let newStatus: Status = path.status == .satisfied ? .online : .offline
-            _Concurrency.Task { @MainActor in
+            _Concurrency.Task { @MainActor [weak self] in
                 self?.handle(newStatus)
             }
         }

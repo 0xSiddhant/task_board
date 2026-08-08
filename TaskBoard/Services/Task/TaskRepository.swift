@@ -8,7 +8,7 @@
 import Combine
 import Foundation
 
-protocol TaskRepository {
+nonisolated protocol TaskRepository: Sendable {
     func createTask(title: String, description: String) -> Task
     func updateTask(id: UUID, title: String?, description: String?) -> Task?
     func moveTask(id: UUID, to status: TaskStatus, position: Double) -> Task?
