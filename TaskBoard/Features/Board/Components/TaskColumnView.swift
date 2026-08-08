@@ -22,30 +22,48 @@ struct TaskColumnView: View {
     let tasks: [Task]
     let draggingTaskID: UUID?
     let dropAnchor: DropAnchor?
+    let matchedIDs: Set<UUID>
+    let isSearchActive: Bool
+    /// Set by the board when a match in this column should be brought into view.
+    let scrollTarget: UUID?
     let onSelect: (Task) -> Void
     let onDragChanged: (Task, CGSize, CGPoint) -> Void
     let onDragEnded: () -> Void
 
     private var isTargeted: Bool { dropAnchor != nil }
 
+    private func searchState(for task: Task) -> CardSearchState {
+        guard isSearchActive else { return .inactive }
+        return matchedIDs.contains(task.id) ? .match : .nonMatch
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
 
-            ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(tasks) { task in
-                        if dropAnchor == .before(task.id) { insertionIndicator }
-                        card(task)
-                            .opacity(task.id == draggingTaskID ? 0.3 : 1)
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(tasks) { task in
+                            if dropAnchor == .before(task.id) { insertionIndicator }
+                            card(task)
+                                .opacity(task.id == draggingTaskID ? 0.3 : 1)
+                                .id(task.id)
+                        }
+
+                        if dropAnchor == .endOfColumn { insertionIndicator }
+
+                        if tasks.isEmpty && dropAnchor == nil { emptyState }
                     }
-
-                    if dropAnchor == .endOfColumn { insertionIndicator }
-
-                    if tasks.isEmpty && dropAnchor == nil { emptyState }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, 8)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.bottom, 8)
+                .onChange(of: scrollTarget) { _, target in
+                    guard let target, tasks.contains(where: { $0.id == target }) else { return }
+                    withAnimation(.smooth(duration: 0.4)) {
+                        proxy.scrollTo(target, anchor: .top)
+                    }
+                }
             }
         }
         .padding(10)
@@ -107,6 +125,7 @@ struct TaskColumnView: View {
     private func card(_ task: Task) -> some View {
         TaskCardView(
             task: task,
+            searchState: searchState(for: task),
             onDragChanged: { translation, location in
                 onDragChanged(task, translation, location)
             },
@@ -114,6 +133,11 @@ struct TaskColumnView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture { onSelect(task) }
+        // While searching, only matches are interactive — tapping or dragging a
+        // dimmed card would act on something the search says you aren't looking
+        // at. Drop targeting is geometry-based, so a match can still be dragged
+        // into any slot among them.
+        .allowsHitTesting(searchState(for: task) != .nonMatch)
         .background {
             GeometryReader { proxy in
                 Color.clear.preference(

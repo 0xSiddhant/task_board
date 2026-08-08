@@ -64,6 +64,10 @@ struct BoardView: View {
     @State private var cardFrames: [CardFrame] = []
     @State private var columnFrames: [ColumnFrame] = []
 
+    @State private var isSearching = false
+    @State private var scrollTarget: UUID?
+    @State private var viewportWidth: CGFloat = 0
+
     private let useCases: TaskUseCases
 
     init(useCases: TaskUseCases) {
@@ -72,15 +76,49 @@ struct BoardView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            columns
-            liftedCard
+        ScrollViewReader { boardProxy in
+            VStack(spacing: 0) {
+                if isSearching {
+                    BoardSearchBar(
+                        text: $viewModel.searchQuery,
+                        matchCount: viewModel.matches.count,
+                        showsResultCount: viewModel.isSearchActive,
+                        onDismiss: dismissSearch
+                    )
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
+                ZStack(alignment: .topLeading) {
+                    columns
+                    liftedCard
+                }
+            }
+            .coordinateSpace(name: BoardLayout.coordinateSpace)
+            .onPreferenceChange(CardFramesKey.self) { cardFrames = $0 }
+            .onPreferenceChange(ColumnFramesKey.self) { columnFrames = $0 }
+            // Keyed off the debounced query, so the board doesn't chase every
+            // keystroke across the screen.
+            .onChange(of: viewModel.activeQuery) { _, _ in
+                revealFirstMatch(using: boardProxy)
+            }
         }
-        .coordinateSpace(name: BoardLayout.coordinateSpace)
-        .onPreferenceChange(CardFramesKey.self) { cardFrames = $0 }
-        .onPreferenceChange(ColumnFramesKey.self) { columnFrames = $0 }
+        .background {
+            GeometryReader { proxy in
+                Color.clear.onAppear { viewportWidth = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, width in viewportWidth = width }
+            }
+        }
+        .animation(.smooth(duration: 0.3), value: isSearching)
         .navigationTitle("Board")
+        .navigationBarTitleDisplayMode(isSearching ? .inline : .large)
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    if isSearching { dismissSearch() } else { isSearching = true }
+                } label: {
+                    Label("Search", systemImage: isSearching ? "magnifyingglass.circle.fill" : "magnifyingglass")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     formMode = .create
@@ -103,10 +141,14 @@ struct BoardView: View {
                         tasks: viewModel.tasks(in: status),
                         draggingTaskID: draggingTask?.id,
                         dropAnchor: dropTarget?.status == status ? dropTarget?.anchor : nil,
+                        matchedIDs: viewModel.matchedIDs,
+                        isSearchActive: viewModel.isSearchActive,
+                        scrollTarget: scrollTarget,
                         onSelect: { formMode = .edit($0) },
                         onDragChanged: dragChanged,
                         onDragEnded: dragEnded
                     )
+                    .id(status)
                 }
             }
             .padding(12)
@@ -131,6 +173,39 @@ struct BoardView: View {
                 .allowsHitTesting(false)
                 .transition(.identity)
         }
+    }
+
+    // MARK: Search
+
+    private func dismissSearch() {
+        isSearching = false
+        scrollTarget = nil
+        viewModel.clearSearch()
+    }
+
+    /// Two stages, because scrolling a column that isn't on screen yet just moves
+    /// content the user can't see. Bring the column across first, let that settle,
+    /// then lift the task to the top of it.
+    private func revealFirstMatch(using boardProxy: ScrollViewProxy) {
+        scrollTarget = nil
+        guard let match = viewModel.matches.first else { return }
+
+        _Concurrency.Task {
+            if !isColumnFullyVisible(match.status) {
+                withAnimation(.smooth(duration: 0.4)) {
+                    boardProxy.scrollTo(match.status, anchor: .center)
+                }
+                try? await _Concurrency.Task.sleep(nanoseconds: 380_000_000)
+            }
+            scrollTarget = match.id
+        }
+    }
+
+    private func isColumnFullyVisible(_ status: TaskStatus) -> Bool {
+        guard viewportWidth > 0,
+              let frame = columnFrames.first(where: { $0.status == status })?.frame
+        else { return false }
+        return frame.minX >= 0 && frame.maxX <= viewportWidth
     }
 
     // MARK: Drag

@@ -158,6 +158,81 @@ struct BoardViewModelTests {
         #expect(viewModel.tasks(in: .todo).isEmpty)
     }
 
+    // MARK: Search
+
+    private func seedSearchable(_ repository: MockTaskRepository, _ viewModel: BoardViewModel) async {
+        _ = repository.createTask(title: "Renew the certificate", description: "before it expires")
+        _ = repository.createTask(title: "Fix the login bug", description: "")
+        let archive = repository.createTask(title: "Archive old logs", description: "certificate rotation")
+        _ = repository.moveTask(id: archive.id, to: .done, position: 0)
+        await settle { viewModel.tasks(in: .done).count == 1 }
+    }
+
+    @Test func aQueryMatchesTitleAndDescriptionCaseInsensitively() async {
+        let repository = MockTaskRepository()
+        let viewModel = BoardViewModel(useCases: TaskUseCases(repository: repository), searchDebounce: .milliseconds(10))
+        await seedSearchable(repository, viewModel)
+
+        viewModel.searchQuery = "CERTIFICATE"
+        await settle { viewModel.matches.count == 2 }
+
+        // One by title, one by description.
+        #expect(Set(viewModel.matches.map(\.title)) == ["Renew the certificate", "Archive old logs"])
+    }
+
+    @Test func matchesAreOrderedLeftToRightSoTheFirstIsTheOneAReaderReaches() async {
+        let repository = MockTaskRepository()
+        let viewModel = BoardViewModel(useCases: TaskUseCases(repository: repository), searchDebounce: .milliseconds(10))
+        await seedSearchable(repository, viewModel)
+
+        viewModel.searchQuery = "certificate"
+        await settle { viewModel.matches.count == 2 }
+
+        // To Do comes before Done, so the To Do match leads.
+        #expect(viewModel.matches.first?.title == "Renew the certificate")
+    }
+
+    @Test func theQueryIsDebouncedBeforeItTakesEffect() async {
+        let repository = MockTaskRepository()
+        let viewModel = BoardViewModel(useCases: TaskUseCases(repository: repository), searchDebounce: .milliseconds(120))
+        await seedSearchable(repository, viewModel)
+
+        viewModel.searchQuery = "cert"
+        // Typing does not immediately move the board.
+        #expect(viewModel.activeQuery.isEmpty)
+        #expect(viewModel.matches.isEmpty)
+
+        await settle { !viewModel.activeQuery.isEmpty }
+        #expect(viewModel.activeQuery == "cert")
+    }
+
+    @Test func clearingResetsBothTheFieldAndTheMatches() async {
+        let repository = MockTaskRepository()
+        let viewModel = BoardViewModel(useCases: TaskUseCases(repository: repository), searchDebounce: .milliseconds(10))
+        await seedSearchable(repository, viewModel)
+
+        viewModel.searchQuery = "certificate"
+        await settle { !viewModel.matches.isEmpty }
+
+        viewModel.clearSearch()
+
+        #expect(viewModel.searchQuery.isEmpty)
+        #expect(viewModel.isSearchActive == false)
+        #expect(viewModel.matches.isEmpty)
+    }
+
+    @Test func whitespaceOnlyIsNotASearch() async {
+        let repository = MockTaskRepository()
+        let viewModel = BoardViewModel(useCases: TaskUseCases(repository: repository), searchDebounce: .milliseconds(10))
+        await seedSearchable(repository, viewModel)
+
+        viewModel.searchQuery = "   "
+        await settle { viewModel.searchQuery == "   " }
+
+        #expect(viewModel.isSearchActive == false)
+        #expect(viewModel.matches.isEmpty)
+    }
+
     @Test func anUnknownAnchorFallsBackToTheEnd() async {
         let (viewModel, repository) = makeSubject()
         await seedThree(repository, viewModel)

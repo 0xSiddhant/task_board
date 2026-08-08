@@ -25,11 +25,22 @@ extension TaskStatus {
     }
 }
 
+/// How a card relates to the current search. `inactive` is the resting state, so
+/// nothing changes when no one is searching.
+enum CardSearchState {
+    case inactive
+    case match
+    case nonMatch
+}
+
 struct TaskCardView: View {
     let task: Task
     var isLifted = false
+    var searchState: CardSearchState = .inactive
     var onDragChanged: ((CGSize, CGPoint) -> Void)?
     var onDragEnded: (() -> Void)?
+
+    private var isMatch: Bool { searchState == .match }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -59,18 +70,35 @@ struct TaskCardView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background, in: RoundedRectangle(cornerRadius: 12))
+        .background {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(.background)
+                // A tint rather than a glow. A shadow behind a card sitting in a
+                // tight stack reads as a hard band against the card below it,
+                // especially in light mode.
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.accentColor.opacity(isMatch ? 0.1 : 0))
+                }
+        }
         .overlay {
             RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(
-                    isLifted ? AnyShapeStyle(Color.accentColor.opacity(0.6)) : AnyShapeStyle(.quaternary),
-                    lineWidth: isLifted ? 1.5 : 1
-                )
+                .strokeBorder(borderStyle, lineWidth: isMatch ? 2 : (isLifted ? 1.5 : 1))
         }
         .shadow(color: .black.opacity(isLifted ? 0.22 : 0), radius: isLifted ? 14 : 0, y: isLifted ? 8 : 0)
+        // Only the dragged card scales. Scaling a match too made it overlap its
+        // neighbour's spacing and clipped the border.
         .scaleEffect(isLifted ? 1.03 : 1)
+        .opacity(searchState == .nonMatch ? 0.35 : 1)
         .animation(.smooth(duration: 0.25), value: isLifted)
         .animation(.smooth(duration: 0.25), value: task.status)
+        .animation(.smooth(duration: 0.3), value: searchState)
+    }
+
+    private var borderStyle: AnyShapeStyle {
+        if isLifted { return AnyShapeStyle(Color.accentColor.opacity(0.6)) }
+        if isMatch { return AnyShapeStyle(Color.accentColor) }
+        return AnyShapeStyle(.quaternary)
     }
 
     private var dragHandle: some View {
