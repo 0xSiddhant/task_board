@@ -31,6 +31,7 @@ enum TaskFormMode: Identifiable {
 struct TaskFormSheet: View {
     @StateObject private var viewModel: TaskFormViewModel
     @Environment(\.dismiss) private var dismiss
+    @State private var isConfirmingDelete = false
 
     init(mode: TaskFormMode, useCases: TaskUseCases) {
         _viewModel = StateObject(wrappedValue: TaskFormViewModel(task: mode.task, useCases: useCases))
@@ -43,6 +44,25 @@ struct TaskFormSheet: View {
 
                 TextField("Description", text: $viewModel.description, axis: .vertical)
                     .lineLimit(3...6)
+
+                if viewModel.canDelete {
+                    Section {
+                        Button("Delete Task", role: .destructive) {
+                            isConfirmingDelete = true
+                        }
+                    }
+                }
+            }
+            .confirmationDialog(
+                "Delete this task?",
+                isPresented: $isConfirmingDelete,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    viewModel.delete()
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) {}
             }
             .navigationTitle(viewModel.isEditing ? "Edit Task" : "New Task")
             .navigationBarTitleDisplayMode(.inline)

@@ -30,19 +30,24 @@ final class BoardViewModel: ObservableObject {
         tasksByStatus[status] ?? []
     }
 
-    /// `index` is the slot to land in, counted with the dragged card already
-    /// removed from the column.
-    func move(_ task: Task, to status: TaskStatus, insertingAt index: Int) {
-        let column = tasks(in: status).filter { $0.id != task.id }
-        let clamped = min(max(index, 0), column.count)
-        let above = clamped > 0 ? column[clamped - 1].position : nil
-        let below = clamped < column.count ? column[clamped].position : nil
+    /// Moves `task` so it sits directly above `anchorID`, or to the end of the
+    /// column when that is nil. A drop onto the slot the task already occupies
+    /// writes nothing — no position change, and no outbox entry to sync.
+    func move(_ task: Task, to status: TaskStatus, before anchorID: UUID?) {
+        let full = tasks(in: status)
+        let column = full.filter { $0.id != task.id }
+        let insertIndex = anchorID.flatMap { id in column.firstIndex { $0.id == id } } ?? column.count
+
+        if task.status == status,
+           let currentIndex = full.firstIndex(where: { $0.id == task.id }),
+           currentIndex == insertIndex {
+            return
+        }
+
+        let above = insertIndex > 0 ? column[insertIndex - 1].position : nil
+        let below = insertIndex < column.count ? column[insertIndex].position : nil
 
         _ = useCases.move(id: task.id, to: status, afterPosition: above, beforePosition: below)
-    }
-
-    func delete(_ task: Task) {
-        useCases.delete(id: task.id)
     }
 
     private func regroup(_ tasks: [Task]) {

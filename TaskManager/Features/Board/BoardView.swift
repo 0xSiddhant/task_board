@@ -13,6 +13,20 @@ enum BoardLayout {
     static let coordinateSpace = "board"
 }
 
+/// Where a dragged card would land, expressed as a neighbour rather than an
+/// index. An index would have to be counted against the column *without* the
+/// dragged card, while the column still displays it — the anchor sidesteps that
+/// mismatch entirely.
+enum DropAnchor: Equatable {
+    case before(UUID)
+    case endOfColumn
+}
+
+struct DropTarget: Equatable {
+    let status: TaskStatus
+    let anchor: DropAnchor
+}
+
 struct CardFrame: Equatable {
     let id: UUID
     let status: TaskStatus
@@ -45,7 +59,7 @@ struct BoardView: View {
     @State private var draggingTask: Task?
     @State private var dragTranslation: CGSize = .zero
     @State private var dragOrigin: CGRect = .zero
-    @State private var dropTarget: (status: TaskStatus, index: Int)?
+    @State private var dropTarget: DropTarget?
 
     @State private var cardFrames: [CardFrame] = []
     @State private var columnFrames: [ColumnFrame] = []
@@ -86,10 +100,10 @@ struct BoardView: View {
                 ForEach(TaskStatus.allCases, id: \.self) { status in
                     TaskColumnView(
                         status: status,
-                        tasks: tasks(in: status),
-                        insertionIndex: dropTarget?.status == status ? dropTarget?.index : nil,
+                        tasks: viewModel.tasks(in: status),
+                        draggingTaskID: draggingTask?.id,
+                        dropAnchor: dropTarget?.status == status ? dropTarget?.anchor : nil,
                         onSelect: { formMode = .edit($0) },
-                        onDelete: delete,
                         onDragChanged: dragChanged,
                         onDragEnded: dragEnded
                     )
@@ -103,8 +117,8 @@ struct BoardView: View {
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
-    /// The dragged card is pulled out of its column and drawn here instead, so the
-    /// column can close the gap behind it and open one at the drop target.
+    /// A copy that follows the finger. The original stays dimmed in place, so the
+    /// column keeps its layout and its header count until a drop actually commits.
     @ViewBuilder
     private var liftedCard: some View {
         if let task = draggingTask {
@@ -117,12 +131,6 @@ struct BoardView: View {
                 .allowsHitTesting(false)
                 .transition(.identity)
         }
-    }
-
-    /// Columns never render the card being dragged — that keeps their indices in
-    /// the same space as the insertion index computed below.
-    private func tasks(in status: TaskStatus) -> [Task] {
-        viewModel.tasks(in: status).filter { $0.id != draggingTask?.id }
     }
 
     // MARK: Drag
@@ -147,15 +155,22 @@ struct BoardView: View {
             dropTarget = nil
         }
 
-        guard let task = draggingTask, let target = dropTarget else { return }
+        // A tap on the handle is a zero-distance drag; committing it would write a
+        // position change for a card that never moved. The view model separately
+        // ignores a drop onto the slot the card already occupies.
+        let moved = abs(dragTranslation.width) > 6 || abs(dragTranslation.height) > 6
+        guard moved, let task = draggingTask, let target = dropTarget else { return }
+
+        let anchorID: UUID? = if case .before(let id) = target.anchor { id } else { nil }
         withAnimation(.smooth(duration: 0.3)) {
-            viewModel.move(task, to: target.status, insertingAt: target.index)
+            viewModel.move(task, to: target.status, before: anchorID)
         }
     }
 
     /// Columns run the full height, so a hit anywhere in the column's horizontal
-    /// band counts. The slot is whichever card midpoint the finger has passed.
-    private func target(at point: CGPoint) -> (status: TaskStatus, index: Int)? {
+    /// band counts. The anchor is the first card whose midpoint the finger is
+    /// above; past the last one, the drop appends.
+    private func target(at point: CGPoint) -> DropTarget? {
         guard let column = columnFrames.first(where: {
             point.x >= $0.frame.minX && point.x <= $0.frame.maxX
         }) else { return nil }
@@ -164,13 +179,9 @@ struct BoardView: View {
             .filter { $0.status == column.status && $0.id != draggingTask?.id }
             .sorted { $0.frame.minY < $1.frame.minY }
 
-        let index = cards.firstIndex { point.y < $0.frame.midY } ?? cards.count
-        return (column.status, index)
-    }
-
-    private func delete(_ task: Task) {
-        withAnimation(.smooth(duration: 0.3)) {
-            viewModel.delete(task)
+        if let hit = cards.first(where: { point.y < $0.frame.midY }) {
+            return DropTarget(status: column.status, anchor: .before(hit.id))
         }
+        return DropTarget(status: column.status, anchor: .endOfColumn)
     }
 }

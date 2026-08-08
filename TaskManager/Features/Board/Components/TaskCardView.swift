@@ -95,9 +95,6 @@ struct TaskCardView: View {
         .animation(.smooth(duration: 0.25), value: task.syncStatus)
     }
 
-    /// Drawn rather than an SF Symbol — there is no 2x3 dot grid glyph, and a
-    /// missing symbol name fails silently. Generous padding makes the grab target
-    /// roughly 44pt even though the dots span 11pt.
     private var dragHandle: some View {
         VStack(spacing: 3) {
             ForEach(0..<3, id: \.self) { _ in

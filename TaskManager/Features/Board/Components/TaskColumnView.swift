@@ -19,16 +19,14 @@ extension TaskStatus {
 
 struct TaskColumnView: View {
     let status: TaskStatus
-    /// Already excludes the card being dragged, so indices here and the insertion
-    /// index the board computes are in the same space.
     let tasks: [Task]
-    let insertionIndex: Int?
+    let draggingTaskID: UUID?
+    let dropAnchor: DropAnchor?
     let onSelect: (Task) -> Void
-    let onDelete: (Task) -> Void
     let onDragChanged: (Task, CGSize, CGPoint) -> Void
     let onDragEnded: () -> Void
 
-    private var isTargeted: Bool { insertionIndex != nil }
+    private var isTargeted: Bool { dropAnchor != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -36,14 +34,15 @@ struct TaskColumnView: View {
 
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(Array(tasks.enumerated()), id: \.element.id) { index, task in
-                        if insertionIndex == index { insertionIndicator }
+                    ForEach(tasks) { task in
+                        if dropAnchor == .before(task.id) { insertionIndicator }
                         card(task)
+                            .opacity(task.id == draggingTaskID ? 0.3 : 1)
                     }
 
-                    if insertionIndex == tasks.count { insertionIndicator }
+                    if dropAnchor == .endOfColumn { insertionIndicator }
 
-                    if tasks.isEmpty && insertionIndex == nil { emptyState }
+                    if tasks.isEmpty && dropAnchor == nil { emptyState }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, 8)
@@ -63,7 +62,7 @@ struct TaskColumnView: View {
                 )
             }
         }
-        .animation(.smooth(duration: 0.28), value: insertionIndex)
+        .animation(.smooth(duration: 0.28), value: dropAnchor)
         .animation(.smooth(duration: 0.28), value: tasks.map(\.id))
     }
 
@@ -115,11 +114,6 @@ struct TaskColumnView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture { onSelect(task) }
-        .contextMenu {
-            Button(role: .destructive) { onDelete(task) } label: {
-                Label("Delete", systemImage: "trash")
-            }
-        }
         .background {
             GeometryReader { proxy in
                 Color.clear.preference(

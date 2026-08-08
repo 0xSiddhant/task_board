@@ -25,6 +25,13 @@ struct BoardViewModelTests {
         }
     }
 
+    private func seedThree(_ repository: MockTaskRepository, _ viewModel: BoardViewModel) async {
+        _ = repository.createTask(title: "A", description: "")
+        _ = repository.createTask(title: "B", description: "")
+        _ = repository.createTask(title: "C", description: "")
+        await settle { viewModel.tasks(in: .todo).count == 3 }
+    }
+
     @Test func groupsTasksByStatus() async {
         let (viewModel, repository) = makeSubject()
 
@@ -40,77 +47,88 @@ struct BoardViewModelTests {
     }
 
     // MARK: Reorder within a column
-    //
-    // `insertingAt` counts slots in the column *with the dragged card removed*.
-    // Passing an index from the unfiltered column silently lands cards one slot
-    // late when moving downwards, which is what these pin down.
 
-    @Test func movingACardDownwardsWithinItsColumnLandsInTheRequestedSlot() async {
+    @Test func movingDownwardsLandsAboveTheAnchor() async {
         let (viewModel, repository) = makeSubject()
+        await seedThree(repository, viewModel)
 
-        _ = repository.createTask(title: "A", description: "")
-        _ = repository.createTask(title: "B", description: "")
-        let c = repository.createTask(title: "C", description: "")
-        await settle { viewModel.tasks(in: .todo).count == 3 }
-
-        // A is dragged to the slot between B and C. With A removed the column is
-        // [B, C], so that is index 1.
         let a = viewModel.tasks(in: .todo)[0]
-        viewModel.move(a, to: .todo, insertingAt: 1)
+        let c = viewModel.tasks(in: .todo)[2]
+        viewModel.move(a, to: .todo, before: c.id)
 
         await settle { viewModel.tasks(in: .todo).map(\.title) == ["B", "A", "C"] }
         #expect(viewModel.tasks(in: .todo).map(\.title) == ["B", "A", "C"])
-        #expect(c.id == viewModel.tasks(in: .todo)[2].id)
     }
 
-    @Test func movingACardUpwardsWithinItsColumnLandsInTheRequestedSlot() async {
+    @Test func movingUpwardsLandsAboveTheAnchor() async {
         let (viewModel, repository) = makeSubject()
+        await seedThree(repository, viewModel)
 
-        _ = repository.createTask(title: "A", description: "")
-        _ = repository.createTask(title: "B", description: "")
-        _ = repository.createTask(title: "C", description: "")
-        await settle { viewModel.tasks(in: .todo).count == 3 }
-
+        let a = viewModel.tasks(in: .todo)[0]
         let c = viewModel.tasks(in: .todo)[2]
-        viewModel.move(c, to: .todo, insertingAt: 0)
+        viewModel.move(c, to: .todo, before: a.id)
 
         await settle { viewModel.tasks(in: .todo).map(\.title) == ["C", "A", "B"] }
         #expect(viewModel.tasks(in: .todo).map(\.title) == ["C", "A", "B"])
     }
 
-    @Test func movingACardToTheEndOfItsOwnColumn() async {
+    @Test func nilAnchorAppendsToTheEnd() async {
         let (viewModel, repository) = makeSubject()
-
-        _ = repository.createTask(title: "A", description: "")
-        _ = repository.createTask(title: "B", description: "")
-        _ = repository.createTask(title: "C", description: "")
-        await settle { viewModel.tasks(in: .todo).count == 3 }
+        await seedThree(repository, viewModel)
 
         let a = viewModel.tasks(in: .todo)[0]
-        // With A removed the column is [B, C], so the end is index 2.
-        viewModel.move(a, to: .todo, insertingAt: 2)
+        viewModel.move(a, to: .todo, before: nil)
 
         await settle { viewModel.tasks(in: .todo).map(\.title) == ["B", "C", "A"] }
         #expect(viewModel.tasks(in: .todo).map(\.title) == ["B", "C", "A"])
     }
 
-    @Test func movingACardOntoItsOwnSlotIsANoOp() async {
+    // MARK: Drops that change nothing must not write
+    //
+    // Every write queues an outbox entry and costs a sync round trip, so putting
+    // a card back where it already was has to be free.
+
+    @Test func droppingAboveTheCardAlreadyBelowItWritesNothing() async {
         let (viewModel, repository) = makeSubject()
+        await seedThree(repository, viewModel)
+        repository.clearOutbox()
 
-        _ = repository.createTask(title: "A", description: "")
-        _ = repository.createTask(title: "B", description: "")
-        await settle { viewModel.tasks(in: .todo).count == 2 }
-
+        // A is already directly above B.
         let a = viewModel.tasks(in: .todo)[0]
-        viewModel.move(a, to: .todo, insertingAt: 0)
+        let b = viewModel.tasks(in: .todo)[1]
+        viewModel.move(a, to: .todo, before: b.id)
 
-        await settle { viewModel.tasks(in: .todo).count == 2 }
-        #expect(viewModel.tasks(in: .todo).map(\.title) == ["A", "B"])
+        #expect(repository.outbox.isEmpty)
+        #expect(viewModel.tasks(in: .todo).map(\.title) == ["A", "B", "C"])
+    }
+
+    @Test func droppingTheLastCardAtTheEndWritesNothing() async {
+        let (viewModel, repository) = makeSubject()
+        await seedThree(repository, viewModel)
+        repository.clearOutbox()
+
+        let c = viewModel.tasks(in: .todo)[2]
+        viewModel.move(c, to: .todo, before: nil)
+
+        #expect(repository.outbox.isEmpty)
+        #expect(viewModel.tasks(in: .todo).map(\.title) == ["A", "B", "C"])
+    }
+
+    @Test func aRealReorderDoesWriteExactlyOneEntry() async {
+        let (viewModel, repository) = makeSubject()
+        await seedThree(repository, viewModel)
+        repository.clearOutbox()
+
+        let c = viewModel.tasks(in: .todo)[2]
+        let a = viewModel.tasks(in: .todo)[0]
+        viewModel.move(c, to: .todo, before: a.id)
+
+        #expect(repository.outbox.map(\.op) == [.update])
     }
 
     // MARK: Cross-column
 
-    @Test func movingBetweenColumnsLandsAtTheRequestedSlot() async {
+    @Test func movingBetweenColumnsLandsAboveTheAnchor() async {
         let (viewModel, repository) = makeSubject()
 
         let a = repository.createTask(title: "A", description: "")
@@ -119,38 +137,35 @@ struct BoardViewModelTests {
         await settle { viewModel.tasks(in: .inProgress).count == 1 }
 
         let dragged = viewModel.tasks(in: .todo).first { $0.id == b.id }!
-        viewModel.move(dragged, to: .inProgress, insertingAt: 0)
+        viewModel.move(dragged, to: .inProgress, before: a.id)
 
         await settle { viewModel.tasks(in: .inProgress).count == 2 }
         #expect(viewModel.tasks(in: .inProgress).map(\.title) == ["B", "A"])
         #expect(viewModel.tasks(in: .todo).isEmpty)
     }
 
-    @Test func outOfRangeIndexIsClampedRatherThanCrashing() async {
+    @Test func movingIntoAnEmptyColumnStillWrites() async {
         let (viewModel, repository) = makeSubject()
 
-        _ = repository.createTask(title: "A", description: "")
-        let b = repository.createTask(title: "B", description: "")
-        await settle { viewModel.tasks(in: .todo).count == 2 }
+        let a = repository.createTask(title: "A", description: "")
+        await settle { viewModel.tasks(in: .todo).count == 1 }
+        repository.clearOutbox()
 
-        viewModel.move(b, to: .todo, insertingAt: 99)
-        await settle { viewModel.tasks(in: .todo).map(\.title) == ["A", "B"] }
-        #expect(viewModel.tasks(in: .todo).map(\.title) == ["A", "B"])
+        viewModel.move(a, to: .done, before: nil)
 
-        viewModel.move(b, to: .todo, insertingAt: -5)
-        await settle { viewModel.tasks(in: .todo).map(\.title) == ["B", "A"] }
-        #expect(viewModel.tasks(in: .todo).map(\.title) == ["B", "A"])
+        await settle { viewModel.tasks(in: .done).count == 1 }
+        #expect(repository.outbox.map(\.op) == [.update])
+        #expect(viewModel.tasks(in: .todo).isEmpty)
     }
 
-    @Test func deleteRemovesTheCardFromTheBoard() async {
+    @Test func anUnknownAnchorFallsBackToTheEnd() async {
         let (viewModel, repository) = makeSubject()
+        await seedThree(repository, viewModel)
 
-        let task = repository.createTask(title: "A", description: "")
-        await settle { viewModel.tasks(in: .todo).count == 1 }
+        let a = viewModel.tasks(in: .todo)[0]
+        viewModel.move(a, to: .todo, before: UUID())
 
-        viewModel.delete(task)
-
-        await settle { viewModel.tasks(in: .todo).isEmpty }
-        #expect(viewModel.tasks(in: .todo).isEmpty)
+        await settle { viewModel.tasks(in: .todo).map(\.title) == ["B", "C", "A"] }
+        #expect(viewModel.tasks(in: .todo).map(\.title) == ["B", "C", "A"])
     }
 }

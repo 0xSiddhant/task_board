@@ -26,6 +26,8 @@ final class TaskFormViewModel: ObservableObject {
 
     var isEditing: Bool { task != nil }
 
+    var canDelete: Bool { task != nil }
+
     var submitLabel: String { isEditing ? "Save" : "Create" }
 
     var canSubmit: Bool {
@@ -44,5 +46,10 @@ final class TaskFormViewModel: ObservableObject {
         } else {
             _ = useCases.create(title: title, description: description)
         }
+    }
+
+    func delete() {
+        guard let task else { return }
+        useCases.delete(id: task.id)
     }
 }
