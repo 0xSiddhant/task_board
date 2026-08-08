@@ -20,6 +20,7 @@ struct RootView: View {
                                 SettingsView(
                                     controls: environment.remoteDebugControls,
                                     uploadService: environment.logUploadService,
+                                    policy: environment.syncPolicy,
                                     sync: { await environment.syncNow() }
                                 )
                             } label: {

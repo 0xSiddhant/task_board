@@ -24,6 +24,12 @@ nonisolated protocol TaskRepository: Sendable {
 
     /// Oldest first — the order the sync engine must drain them in.
     func pendingOutboxEntries() -> [OutboxEntry]
+
+    /// Emits the queue depth, and only when it actually changes. Deliberately not
+    /// derived from `tasksPublisher`: marking a task `.failed` writes to the task,
+    /// so a queue-depth trigger built on task changes would re-fire after every
+    /// failed push and retry forever.
+    func pendingOutboxCountPublisher() -> AnyPublisher<Int, Never>
     func removeOutboxEntry(id: UUID)
     /// Includes soft-deleted rows; sync still needs the row a delete refers to.
     func fetchTask(id: UUID) -> Task?

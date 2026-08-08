@@ -8,6 +8,7 @@ nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unche
     private let context: NSManagedObjectContext
 
     private let subject = CurrentValueSubject<[Task], Never>([])
+    private let outboxCount = CurrentValueSubject<Int, Never>(0)
     private var controller: NSFetchedResultsController<CDTask>?
 
     init(stack: CoreDataStack) {
@@ -146,6 +147,17 @@ nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unche
         return result
     }
 
+    func pendingOutboxCountPublisher() -> AnyPublisher<Int, Never> {
+        context.performAndWait { publishOutboxCount() }
+        return outboxCount.removeDuplicates().eraseToAnyPublisher()
+    }
+
+    /// A count query rather than fetching the rows — this runs after every save.
+    private func publishOutboxCount() {
+        let count = (try? context.count(for: CDOutboxEntry.typedFetchRequest())) ?? 0
+        outboxCount.send(count)
+    }
+
     func removeOutboxEntry(id: UUID) {
         context.performAndWait {
             let request = CDOutboxEntry.typedFetchRequest()
@@ -228,6 +240,7 @@ nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unche
         guard context.hasChanges else { return }
         do {
             try context.save()
+            publishOutboxCount()
         } catch {
             context.rollback()
             Logger.record("Core Data save failed: \(error)", level: .error)

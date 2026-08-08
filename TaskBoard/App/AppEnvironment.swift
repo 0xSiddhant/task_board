@@ -21,6 +21,7 @@ final class AppEnvironment: ObservableObject {
     /// fault-injection controls against a real one.
     let remoteDebugControls: RemoteTaskDebugControls?
     let logUploadService: LogUploadService
+    let syncPolicy = SyncPolicy()
 
     private let backendName: String
     private let stack: CoreDataStack
@@ -78,8 +79,27 @@ final class AppEnvironment: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // The queue depth, not the task list. A failed push marks the task
+        // `.failed`, which changes the task but not the queue — keying off tasks
+        // would re-trigger on that write and retry in a loop.
+        repository.pendingOutboxCountPublisher()
+            .debounce(for: .milliseconds(400), scheduler: DispatchQueue.main)
+            .sink { [weak self] pending in
+                self?.syncIfQueueHasBuiltUp(pending: pending)
+            }
+            .store(in: &cancellables)
+
         let reporter = Self.makeCrashReporter(usesFirebase: usesFirebase)
         _Concurrency.Task { await Logger.shared.attach(crashReporter: reporter) }
+    }
+
+    /// The trigger that covers someone working continuously in the foreground,
+    /// who never hits launch, reconnect, foreground, or background refresh.
+    private func syncIfQueueHasBuiltUp(pending: Int) {
+        guard pending >= syncPolicy.pendingThreshold else { return }
+
+        Logger.record("Outbox reached \(pending) pending, threshold is \(syncPolicy.pendingThreshold) — syncing")
+        _Concurrency.Task { await syncNow() }
     }
 
     /// The one entry point for a sync from outside — used by the foreground

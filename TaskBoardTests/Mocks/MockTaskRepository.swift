@@ -21,6 +21,7 @@ final class MockTaskRepository: TaskRepository {
     var now: () -> Date = Date.init
 
     private let subject = CurrentValueSubject<[Task], Never>([])
+    private let outboxCount = CurrentValueSubject<Int, Never>(0)
 
     // MARK: Test helpers
 
@@ -113,6 +114,10 @@ final class MockTaskRepository: TaskRepository {
         outbox   // appended in order, so already oldest-first
     }
 
+    func pendingOutboxCountPublisher() -> AnyPublisher<Int, Never> {
+        outboxCount.removeDuplicates().eraseToAnyPublisher()
+    }
+
     func removeOutboxEntry(id: UUID) {
         outbox.removeAll { $0.id == id }
     }
@@ -151,5 +156,6 @@ final class MockTaskRepository: TaskRepository {
 
     private func publish() {
         subject.send(fetchTasks(status: nil))
+        outboxCount.send(outbox.count)
     }
 }

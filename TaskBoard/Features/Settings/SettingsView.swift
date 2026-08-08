@@ -9,12 +9,15 @@ import SwiftUI
 
 struct SettingsView: View {
     @StateObject private var viewModel: SettingsViewModel
+    @ObservedObject var policy: SyncPolicy
 
     init(
         controls: RemoteTaskDebugControls?,
         uploadService: LogUploadService,
+        policy: SyncPolicy,
         sync: @escaping @Sendable () async -> Void
     ) {
+        self.policy = policy
         _viewModel = StateObject(
             wrappedValue: SettingsViewModel(
                 controls: controls,
@@ -37,10 +40,19 @@ struct SettingsView: View {
                     }
                 }
                 .disabled(viewModel.syncState == .syncing)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    LabeledContent("Sync after", value: pendingThresholdLabel)
+                    Slider(
+                        value: thresholdBinding,
+                        in: Double(SyncPolicy.thresholdRange.lowerBound)...Double(SyncPolicy.thresholdRange.upperBound),
+                        step: 1
+                    )
+                }
             } header: {
                 Text("Sync")
             } footer: {
-                Text("Otherwise syncing happens at launch, on reconnect, and via background refresh.")
+                Text("Also syncs at launch, on reconnect, on returning to the foreground, and via background refresh. The threshold covers a long session that hits none of those.")
             }
 
             if viewModel.canConfigureBackend {
@@ -85,6 +97,18 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.load() }
+    }
+
+    private var pendingThresholdLabel: String {
+        let count = policy.pendingThreshold
+        return count == 1 ? "1 pending change" : "\(count) pending changes"
+    }
+
+    private var thresholdBinding: Binding<Double> {
+        Binding(
+            get: { Double(policy.pendingThreshold) },
+            set: { policy.pendingThreshold = Int($0.rounded()) }
+        )
     }
 
     @ViewBuilder
