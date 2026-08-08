@@ -26,6 +26,7 @@ actor MockRemoteTaskService: RemoteTaskService {
     private(set) var attempts: [Operation] = []
 
     private var queuedErrors: [Operation: [Error]] = [:]
+    private var delays: [Operation: TimeInterval] = [:]
 
     // MARK: Test control
 
@@ -37,6 +38,12 @@ actor MockRemoteTaskService: RemoteTaskService {
         queuedErrors[operation, default: []].append(error)
     }
 
+    /// Stalls a call so the engine's deadline is what ends it, standing in for a
+    /// backend that neither answers nor errors.
+    func setDelay(_ seconds: TimeInterval, for operation: Operation) {
+        delays[operation] = seconds
+    }
+
     func attempts(of operation: Operation) -> Int {
         attempts.filter { $0 == operation }.count
     }
@@ -44,28 +51,34 @@ actor MockRemoteTaskService: RemoteTaskService {
     // MARK: RemoteTaskService
 
     func fetchTasks() async throws -> [Task] {
-        try record(.fetch)
+        try await record(.fetch)
         return Array(serverTasks.values)
     }
 
     func create(_ task: Task) async throws {
-        try record(.create)
+        try await record(.create)
         serverTasks[task.id] = task
     }
 
     func update(_ task: Task) async throws {
-        try record(.update)
+        try await record(.update)
         serverTasks[task.id] = task
     }
 
     func delete(id: UUID) async throws {
-        try record(.delete)
+        try await record(.delete)
         serverTasks[id] = nil
     }
 
-    /// Logs the attempt before throwing, so a failed call still counts as tried.
-    private func record(_ operation: Operation) throws {
+    /// Logs the attempt before stalling or throwing, so a call that never
+    /// completes still counts as tried.
+    private func record(_ operation: Operation) async throws {
         attempts.append(operation)
+
+        if let delay = delays[operation] {
+            try await _Concurrency.Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        }
+
         guard var errors = queuedErrors[operation], !errors.isEmpty else { return }
         let error = errors.removeFirst()
         queuedErrors[operation] = errors

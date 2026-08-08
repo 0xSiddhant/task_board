@@ -199,6 +199,62 @@ struct SyncEngineTests {
         #expect(await remote.serverTasks.isEmpty)
     }
 
+    // MARK: Timeouts
+    //
+    // A backend that neither answers nor errors must not hang the engine — that
+    // is exactly what a misconfigured Firestore does, since it retries a rejected
+    // write stream indefinitely instead of failing.
+
+    @Test func aPullThatNeverAnswersTimesOutAndLeavesTheQueueIntact() async {
+        let repository = MockTaskRepository()
+        let remote = MockRemoteTaskService()
+        let engine = SyncEngine(repository: repository, remote: remote, timeout: 0.2)
+        repository.now = { self.base }
+
+        let created = repository.createTask(title: "A", description: "")
+        await remote.setDelay(30, for: .fetch)
+
+        await engine.sync()
+
+        #expect(repository.pendingOutboxEntries().count == 1)
+        #expect(repository.fetchTask(id: created.id)?.syncStatus == .pending)
+        #expect(await remote.attempts(of: .create) == 0)
+    }
+
+    @Test func aPushThatNeverAnswersMarksFailedAndKeepsTheEntry() async {
+        let repository = MockTaskRepository()
+        let remote = MockRemoteTaskService()
+        let engine = SyncEngine(repository: repository, remote: remote, timeout: 0.2)
+        repository.now = { self.base }
+
+        let first = repository.createTask(title: "A", description: "")
+        _ = repository.createTask(title: "B", description: "")
+        await remote.setDelay(30, for: .create)
+
+        await engine.sync()
+
+        #expect(repository.pendingOutboxEntries().count == 2)
+        #expect(repository.fetchTask(id: first.id)?.syncStatus == .failed)
+        // Stopped at the stalled entry rather than running the whole queue into
+        // one timeout after another.
+        #expect(await remote.attempts(of: .create) == 1)
+    }
+
+    @Test func aCallThatAnswersInTimeIsUnaffected() async {
+        let repository = MockTaskRepository()
+        let remote = MockRemoteTaskService()
+        let engine = SyncEngine(repository: repository, remote: remote, timeout: 2)
+        repository.now = { self.base }
+
+        let created = repository.createTask(title: "A", description: "")
+        await remote.setDelay(0.05, for: .create)
+
+        await engine.sync()
+
+        #expect(repository.pendingOutboxEntries().isEmpty)
+        #expect(repository.fetchTask(id: created.id)?.syncStatus == .synced)
+    }
+
     // MARK: hasConflict
 
     @Test func hasConflictComparesServerAgainstTheBaseVersion() async {

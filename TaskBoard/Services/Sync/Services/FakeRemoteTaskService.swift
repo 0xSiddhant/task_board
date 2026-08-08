@@ -1,5 +1,5 @@
 //
-//  RemoteTaskService.swift
+//  FakeRemoteTaskService.swift
 //  TaskBoard
 //
 //  Created by Siddhant Kumar on 08/08/26.
@@ -7,36 +7,10 @@
 
 import Foundation
 
-protocol RemoteTaskService {
-    func fetchTasks() async throws -> [Task]
-    func create(_ task: Task) async throws
-    func update(_ task: Task) async throws
-    func delete(id: UUID) async throws
-}
-
-enum RemoteError: Error {
-    case offline
-    case injectedFailure
-}
-
-struct RemoteDebugSettings: Equatable {
-    var simulatedLatency: TimeInterval
-    var forceOffline: Bool
-    var failureRate: Double
-}
-
-/// Fault-injection knobs, deliberately kept off `RemoteTaskService` — a real
-/// backend has no failure rate. Only test doubles conform, which lets the
-/// composition root hold the protocol and still swap in a live implementation.
-protocol RemoteTaskDebugControls: Sendable {
-    func debugSettings() async -> RemoteDebugSettings
-    func setSimulatedLatency(_ value: TimeInterval) async
-    func setForceOffline(_ value: Bool) async
-    func setFailureRate(_ value: Double) async
-}
-
-/// The default backend. In-memory, so the app runs with no external
-/// configuration, and the knobs make the offline and failure paths reachable.
+/// The default backend, used whenever no Firebase project is configured — which
+/// includes every fresh clone, since GoogleService-Info.plist is gitignored. The
+/// knobs also make the offline and failure paths reachable without unplugging
+/// anything.
 actor FakeRemoteTaskService: RemoteTaskService, RemoteTaskDebugControls {
     private var storage: [UUID: Task] = [:]
 

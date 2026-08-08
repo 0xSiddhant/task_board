@@ -20,7 +20,42 @@ the app ships with an in-memory fake backend.
    uses the fake backend.
 3. **File → Add Package Dependencies…** →
    `https://github.com/firebase/firebase-ios-sdk`. Add `FirebaseCore`,
-   `FirebaseFirestore`, and `FirebaseStorage` to the TaskBoard target.
+   `FirebaseFirestore`, `FirebaseStorage`, and `FirebaseCrashlytics` to
+   the TaskBoard target.
+
+4. Enable Firestore (Build → Firestore Database → Create database) and
+   replace the default deny-all rules:
+
+   ```
+   rules_version = '2';
+
+   service cloud.firestore {
+     match /databases/{database}/documents {
+       match /tasks/{taskId} {
+         allow read, write: if true;
+       }
+     }
+   }
+   ```
+
+   Log upload uses Storage, which has its own ruleset:
+
+   ```
+   rules_version = '2';
+
+   service firebase.storage {
+     match /b/{bucket}/o {
+       match /logs/{logFile} {
+         allow read, write: if true;
+       }
+     }
+   }
+   ```
+
+   The app has no authentication, so these rules leave the data open to
+   anyone holding the project config — which ships inside the app bundle.
+   They're fine for a demo and wrong for anything else; a real deployment
+   wants Firebase Auth and per-user document scoping.
 
 ## Architecture
 

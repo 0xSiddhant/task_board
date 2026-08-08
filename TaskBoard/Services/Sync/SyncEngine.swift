@@ -7,13 +7,40 @@
 
 import Foundation
 
+enum SyncError: Error {
+    case timedOut
+}
+
 actor SyncEngine {
     private let repository: TaskRepository
     private let remote: RemoteTaskService
+    private let timeout: TimeInterval
 
-    init(repository: TaskRepository, remote: RemoteTaskService) {
+    /// Firestore retries a rejected write stream indefinitely rather than
+    /// erroring, so a misconfigured backend hangs `sync()` forever and the queue
+    /// never drains. Every remote call gets a deadline for that reason.
+    init(repository: TaskRepository, remote: RemoteTaskService, timeout: TimeInterval = 15) {
         self.repository = repository
         self.remote = remote
+        self.timeout = timeout
+    }
+
+    /// Races the call against a sleep. Cancelling the group cancels the work, but
+    /// a backend that ignores cancellation may still complete its write — the
+    /// point is that the engine regains control and can requeue.
+    private func withTimeout<T: Sendable>(
+        _ operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        let seconds = timeout
+        return try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await _Concurrency.Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw SyncError.timedOut
+            }
+            defer { group.cancelAll() }
+            return try await group.next()!
+        }
     }
 
     /// Pull, diff, resolve, push. Resolving before pushing is the point: it stops
@@ -21,7 +48,8 @@ actor SyncEngine {
     func sync() async {
         let remoteTasks: [Task]
         do {
-            remoteTasks = try await remote.fetchTasks()
+            let remote = self.remote
+            remoteTasks = try await withTimeout { try await remote.fetchTasks() }
         } catch {
             // Nothing drained, nothing marked failed: the queue is untouched.
             await log("Sync pull failed: \(error)", level: .error)
@@ -81,10 +109,11 @@ actor SyncEngine {
             }
 
             do {
+                let remote = self.remote
                 switch entry.op {
-                case .create: try await remote.create(task)
-                case .update: try await remote.update(task)
-                case .delete: try await remote.delete(id: task.id)
+                case .create: try await withTimeout { try await remote.create(task) }
+                case .update: try await withTimeout { try await remote.update(task) }
+                case .delete: try await withTimeout { try await remote.delete(id: task.id) }
                 }
             } catch {
                 repository.markSyncStatus(.failed, for: entry.taskId)

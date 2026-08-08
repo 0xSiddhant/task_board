@@ -24,6 +24,7 @@ actor Logger {
     private let previousURL: URL
     private let maxFileSizeBytes: Int
     private var fileHandle: FileHandle?
+    private var crashReporter: CrashReporter = NoOpCrashReporter()
 
     private init(maxFileSizeBytes: Int = 2_000_000) {   // ~2 MB per generation, ~4 MB retained max
         let dir = Logger.logsDirectory()
@@ -43,6 +44,13 @@ actor Logger {
         _Concurrency.Task { await Logger.shared.log(message, level: level) }
     }
 
+    /// Set once at startup by the composition root. Every logged line then also
+    /// becomes crash-report context, so a crash arrives with the sync activity
+    /// that preceded it.
+    func attach(crashReporter: CrashReporter) {
+        self.crashReporter = crashReporter
+    }
+
     func log(_ message: String, level: LogLevel = .info) {
         let line = "[\(Self.timestamp())] [\(level.rawValue)] \(message)\n"
 
@@ -52,6 +60,11 @@ actor Logger {
 
         write(line)
         rotateIfNeeded()
+
+        crashReporter.breadcrumb(line)
+        if level == .error {
+            crashReporter.record(message)
+        }
     }
 
     /// Combined bytes across both generations — what gets handed to the upload service.

@@ -19,8 +19,7 @@ final class AppEnvironment: ObservableObject {
     /// Non-nil only when the backend is a test double, so Settings can hide its
     /// fault-injection controls against a real one.
     let remoteDebugControls: RemoteTaskDebugControls?
-    /// No-op by default so the app runs with no Firebase project configured.
-    let logUploadService: LogUploadService = NoOpLogUploadService()
+    let logUploadService: LogUploadService
 
     private let stack: CoreDataStack
     private let repository: CoreDataTaskRepository
@@ -32,11 +31,27 @@ final class AppEnvironment: ObservableObject {
     init(inMemory: Bool = false) {
         stack = CoreDataStack(inMemory: inMemory)
         repository = CoreDataTaskRepository(stack: stack)
-        let fakeRemote = FakeRemoteTaskService()
-        remote = fakeRemote
-        remoteDebugControls = fakeRemote
         taskUseCases = TaskUseCases(repository: repository)
-        syncEngine = SyncEngine(repository: repository, remote: fakeRemote)
+
+        let usesFirebase = FirebaseBootstrap.isConfigured
+
+        #if canImport(FirebaseFirestore)
+        if usesFirebase {
+            remote = FirebaseRemoteTaskService()
+            remoteDebugControls = nil   // a real backend has no fault-injection knobs
+        } else {
+            let fake = FakeRemoteTaskService()
+            remote = fake
+            remoteDebugControls = fake
+        }
+        #else
+        let fake = FakeRemoteTaskService()
+        remote = fake
+        remoteDebugControls = fake
+        #endif
+
+        logUploadService = usesFirebase ? FirebaseLogUploadService() : NoOpLogUploadService()
+        syncEngine = SyncEngine(repository: repository, remote: remote)
 
         // statusChanges rather than $status: it only fires for fluctuations during
         // the session, so opening the app with no connection shows nothing.
@@ -45,10 +60,20 @@ final class AppEnvironment: ObservableObject {
                 self?.connectivityChanged(to: status)
             }
             .store(in: &cancellables)
+
+        let reporter = Self.makeCrashReporter(usesFirebase: usesFirebase)
+        _Concurrency.Task { await Logger.shared.attach(crashReporter: reporter) }
+    }
+
+    private static func makeCrashReporter(usesFirebase: Bool) -> CrashReporter {
+        #if canImport(FirebaseCrashlytics)
+        if usesFirebase { return FirebaseCrashReporter() }
+        #endif
+        return NoOpCrashReporter()
     }
 
     func start() {
-        Logger.record("App started")
+        Logger.record("App started, backend: \(remoteDebugControls == nil ? "Firebase" : "in-memory fake")")
         _Concurrency.Task { await syncEngine.sync() }
     }
 
