@@ -9,6 +9,7 @@ nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unche
 
     private let subject = CurrentValueSubject<[Task], Never>([])
     private let outboxCount = CurrentValueSubject<Int, Never>(0)
+    private let archived = CurrentValueSubject<[ArchivedTask], Never>([])
     private var controller: NSFetchedResultsController<CDTask>?
 
     init(stack: CoreDataStack) {
@@ -135,6 +136,127 @@ nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unche
         subject.send((controller?.fetchedObjects ?? []).map { $0.toDomain() })
     }
 
+    // MARK: Archive
+
+    /// Moves the row out of `CDTask` and into `CDArchivedTask`, queuing one
+    /// entry. Both halves and the entry commit in a single `save()`, so the task
+    /// is never in both tables or neither.
+    func archiveTask(id: UUID) {
+        context.performAndWait {
+            guard let cdTask = fetch(id: id), cdTask.deletedAt == nil else { return }
+
+            let entry = CDArchivedTask(context: context)
+            entry.id = cdTask.id
+            entry.title = cdTask.title
+            entry.taskDescription = cdTask.taskDescription
+            // The column and slot it held, which is what a restore reads back.
+            entry.status = cdTask.status
+            entry.position = cdTask.position
+            entry.createdAt = cdTask.createdAt
+            entry.updatedAt = Date()
+            entry.archivedAt = Date()
+
+            enqueue(.archive, taskId: id, baseUpdatedAt: cdTask.updatedAt)
+            context.delete(cdTask)
+            save()
+        }
+    }
+
+    /// The mirror image: out of `CDArchivedTask`, back into `CDTask` in the
+    /// column it was archived from, one queued entry, one transaction.
+    @discardableResult
+    func restoreTask(id: UUID) -> Task? {
+        var result: Task?
+        context.performAndWait {
+            guard let entry = fetchArchived(id: id) else { return }
+            let status = TaskStatus(rawValue: entry.status) ?? .todo
+            let now = Date()
+
+            let cdTask = fetch(id: entry.id) ?? CDTask(context: context)
+            cdTask.id = entry.id
+            cdTask.title = entry.title
+            cdTask.taskDescription = entry.taskDescription
+            cdTask.status = entry.status
+            cdTask.position = restorePosition(entry.position, in: status)
+            cdTask.createdAt = entry.createdAt
+            cdTask.updatedAt = now
+            cdTask.syncStatus = SyncStatus.pending.rawValue
+            cdTask.deletedAt = nil
+
+            enqueue(.restore, taskId: entry.id, baseUpdatedAt: entry.updatedAt)
+            context.delete(entry)
+            result = cdTask.toDomain()
+            save()
+        }
+        return result
+    }
+
+    /// Deduplicated because `publishArchived` runs after every save, most of
+    /// which are board writes that leave the archive untouched.
+    func archivedTasksPublisher() -> AnyPublisher<[ArchivedTask], Never> {
+        context.performAndWait { publishArchived() }
+        return archived.removeDuplicates().eraseToAnyPublisher()
+    }
+
+    func fetchArchivedTask(id: UUID) -> ArchivedTask? {
+        var result: ArchivedTask?
+        context.performAndWait {
+            result = fetchArchived(id: id)?.toDomain()
+        }
+        return result
+    }
+
+    /// Remote archive state landing locally. Drops the task row if this device
+    /// still has one, keeping the invariant that a record lives in exactly one
+    /// of the two tables.
+    func applyRemoteArchive(_ archived: ArchivedTask) {
+        context.performAndWait {
+            let entry = fetchArchived(id: archived.id) ?? CDArchivedTask(context: context)
+            entry.id = archived.id
+            entry.title = archived.title
+            entry.taskDescription = archived.description
+            entry.status = archived.status.rawValue
+            entry.position = archived.position
+            entry.createdAt = archived.createdAt
+            entry.updatedAt = archived.updatedAt
+            entry.archivedAt = archived.archivedAt
+
+            if let cdTask = fetch(id: archived.id) { context.delete(cdTask) }
+            save()
+        }
+    }
+
+    /// Refreshed on every save rather than through a second fetched-results
+    /// controller: the archive only ever changes through a local write on this
+    /// context, so there is nothing a controller would catch that this misses.
+    private func publishArchived() {
+        let request = CDArchivedTask.typedFetchRequest()
+        request.sortDescriptors = [NSSortDescriptor(key: "archivedAt", ascending: false)]
+        archived.send(((try? context.fetch(request)) ?? []).map { $0.toDomain() })
+    }
+
+    private func fetchArchived(id: UUID) -> CDArchivedTask? {
+        let request = CDArchivedTask.typedFetchRequest()
+        request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+        request.fetchLimit = 1
+        return (try? context.fetch(request))?.first
+    }
+
+    /// The slot the card left, when nothing has taken it since. Falling back to
+    /// the end of the column keeps positions distinct — two cards sharing one
+    /// position sort against each other arbitrarily.
+    private func restorePosition(_ position: Double, in status: TaskStatus) -> Double {
+        let request = CDTask.typedFetchRequest()
+        request.predicate = NSPredicate(
+            format: "deletedAt == nil AND status == %@ AND position == %@",
+            status.rawValue,
+            NSNumber(value: position)
+        )
+        request.fetchLimit = 1
+        let taken = ((try? context.count(for: request)) ?? 0) > 0
+        return taken ? nextPosition(in: status) : position
+    }
+
     // MARK: Sync support
 
     func pendingOutboxEntries() -> [OutboxEntry] {
@@ -189,6 +311,10 @@ nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unche
     /// that needs pushing back.
     func applyRemote(_ task: Task) {
         context.performAndWait {
+            // A record the server holds as a live task is no longer archived —
+            // another device restored it, so this device's archive row goes.
+            if let archivedRow = fetchArchived(id: task.id) { context.delete(archivedRow) }
+
             let cdTask = fetch(id: task.id) ?? CDTask(context: context)
             cdTask.id = task.id
             cdTask.title = task.title
@@ -241,6 +367,7 @@ nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unche
         do {
             try context.save()
             publishOutboxCount()
+            publishArchived()
         } catch {
             context.rollback()
             Logger.record("Core Data save failed: \(error)", level: .error)
@@ -269,6 +396,21 @@ private nonisolated extension CDOutboxEntry {
             taskId: taskId,
             baseUpdatedAt: baseUpdatedAt,
             createdAt: createdAt
+        )
+    }
+}
+
+private nonisolated extension CDArchivedTask {
+    func toDomain() -> ArchivedTask {
+        ArchivedTask(
+            id: id,
+            title: title,
+            description: taskDescription,
+            status: TaskStatus(rawValue: status) ?? .todo,
+            position: position,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            archivedAt: archivedAt
         )
     }
 }

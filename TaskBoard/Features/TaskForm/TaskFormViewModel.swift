@@ -28,6 +28,16 @@ final class TaskFormViewModel: ObservableObject {
 
     var canDelete: Bool { task != nil }
 
+    /// Nothing to archive until the task exists, so the button is absent while
+    /// creating one — and absent in Done, which is a resting place of its own.
+    var canArchive: Bool {
+        guard let task else { return false }
+        return task.status != .done
+    }
+
+    /// Names the column a restore would return the task to.
+    var archiveOriginLabel: String { task?.status.displayName ?? "its column" }
+
     var submitLabel: String { isEditing ? "Save" : "Create" }
 
     var canSubmit: Bool {
@@ -51,5 +61,13 @@ final class TaskFormViewModel: ObservableObject {
     func delete() {
         guard let task else { return }
         useCases.delete(id: task.id)
+    }
+
+    /// Deliberately does not save pending edits first: archiving is an action on
+    /// the task as it stands, and silently committing text the user never
+    /// confirmed would be a surprise.
+    func archive() {
+        guard let task else { return }
+        useCases.archive(id: task.id)
     }
 }

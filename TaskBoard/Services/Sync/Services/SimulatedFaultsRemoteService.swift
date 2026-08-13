@@ -62,6 +62,21 @@ actor SimulatedFaultsRemoteService: RemoteTaskService, RemoteTaskDebugControls {
         try await wrapped.delete(task)
     }
 
+    func fetchArchived() async throws -> [ArchivedTask] {
+        try await simulate()
+        return try await wrapped.fetchArchived()
+    }
+
+    func archive(_ archived: ArchivedTask) async throws {
+        try await simulate()
+        try await wrapped.archive(archived)
+    }
+
+    func restore(_ task: Task) async throws {
+        try await simulate()
+        try await wrapped.restore(task)
+    }
+
     /// Latency before failure, so a failing call still costs time and the pending
     /// state stays visible. Throwing here means the wrapped backend is never
     /// reached — an injected outage looks like a real one.

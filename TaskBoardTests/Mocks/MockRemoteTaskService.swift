@@ -14,6 +14,7 @@ import Foundation
 actor MockRemoteTaskService: RemoteTaskService {
     enum Operation: String, Hashable {
         case fetch, create, update, delete
+        case fetchArchived, archive, restore
     }
 
     struct StubbedError: Error, Equatable {
@@ -21,6 +22,7 @@ actor MockRemoteTaskService: RemoteTaskService {
     }
 
     private(set) var serverTasks: [UUID: Task] = [:]
+    private(set) var serverArchived: [UUID: ArchivedTask] = [:]
     /// Every attempted call, in order — the record that proves a failed push
     /// stopped the queue instead of skipping ahead.
     private(set) var attempts: [Operation] = []
@@ -32,6 +34,10 @@ actor MockRemoteTaskService: RemoteTaskService {
 
     func seed(_ tasks: [Task]) {
         for task in tasks { serverTasks[task.id] = task }
+    }
+
+    func seedArchived(_ archived: [ArchivedTask]) {
+        for entry in archived { serverArchived[entry.id] = entry }
     }
 
     func queueError(_ error: Error, for operation: Operation) {
@@ -68,6 +74,27 @@ actor MockRemoteTaskService: RemoteTaskService {
     func delete(_ task: Task) async throws {
         try await record(.delete)
         serverTasks[task.id] = task.tombstone
+    }
+
+    // MARK: Archive
+
+    func fetchArchived() async throws -> [ArchivedTask] {
+        try await record(.fetchArchived)
+        return Array(serverArchived.values)
+    }
+
+    /// Both collections in one step, so a test can assert the record never
+    /// appears in both.
+    func archive(_ archived: ArchivedTask) async throws {
+        try await record(.archive)
+        serverArchived[archived.id] = archived
+        serverTasks[archived.id] = nil
+    }
+
+    func restore(_ task: Task) async throws {
+        try await record(.restore)
+        serverTasks[task.id] = task
+        serverArchived[task.id] = nil
     }
 
     /// Logs the attempt before stalling or throwing, so a call that never

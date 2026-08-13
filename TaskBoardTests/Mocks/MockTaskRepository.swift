@@ -14,6 +14,7 @@ import Foundation
 /// `updatedAt`, and deletes are soft — the row survives as a tombstone.
 final class MockTaskRepository: TaskRepository {
     private(set) var storage: [UUID: Task] = [:]
+    private(set) var archiveStorage: [UUID: ArchivedTask] = [:]
     private(set) var outbox: [OutboxEntry] = []
 
     /// Injectable so tests can order `updatedAt` values deliberately rather than
@@ -22,6 +23,7 @@ final class MockTaskRepository: TaskRepository {
 
     private let subject = CurrentValueSubject<[Task], Never>([])
     private let outboxCount = CurrentValueSubject<Int, Never>(0)
+    private let archived = CurrentValueSubject<[ArchivedTask], Never>([])
 
     // MARK: Test helpers
 
@@ -108,6 +110,62 @@ final class MockTaskRepository: TaskRepository {
         subject.eraseToAnyPublisher()
     }
 
+    // MARK: Archive
+
+    func archiveTask(id: UUID) {
+        guard let task = storage[id], task.deletedAt == nil else { return }
+
+        archiveStorage[id] = ArchivedTask(
+            id: task.id,
+            title: task.title,
+            description: task.description,
+            status: task.status,
+            position: task.position,
+            createdAt: task.createdAt,
+            updatedAt: now(),
+            archivedAt: now()
+        )
+        enqueue(.archive, taskId: id, baseUpdatedAt: task.updatedAt)
+        storage[id] = nil
+        publish()
+    }
+
+    @discardableResult
+    func restoreTask(id: UUID) -> Task? {
+        guard let entry = archiveStorage[id] else { return nil }
+
+        let task = Task(
+            id: entry.id,
+            title: entry.title,
+            description: entry.description,
+            status: entry.status,
+            position: entry.position,
+            createdAt: entry.createdAt,
+            updatedAt: now(),
+            syncStatus: .pending,
+            deletedAt: nil
+        )
+        storage[id] = task
+        enqueue(.restore, taskId: id, baseUpdatedAt: entry.updatedAt)
+        archiveStorage[id] = nil
+        publish()
+        return task
+    }
+
+    func archivedTasksPublisher() -> AnyPublisher<[ArchivedTask], Never> {
+        archived.eraseToAnyPublisher()
+    }
+
+    func fetchArchivedTask(id: UUID) -> ArchivedTask? {
+        archiveStorage[id]
+    }
+
+    func applyRemoteArchive(_ archived: ArchivedTask) {
+        archiveStorage[archived.id] = archived
+        storage[archived.id] = nil   // a record lives in one table, never both
+        publish()
+    }
+
     // MARK: Sync support
 
     func pendingOutboxEntries() -> [OutboxEntry] {
@@ -135,6 +193,7 @@ final class MockTaskRepository: TaskRepository {
         var incoming = task
         incoming.syncStatus = .synced
         storage[task.id] = incoming
+        archiveStorage[task.id] = nil   // live on the server means no longer archived
         publish()
     }
 
@@ -157,5 +216,6 @@ final class MockTaskRepository: TaskRepository {
     private func publish() {
         subject.send(fetchTasks(status: nil))
         outboxCount.send(outbox.count)
+        archived.send(archiveStorage.values.sorted { $0.archivedAt > $1.archivedAt })
     }
 }

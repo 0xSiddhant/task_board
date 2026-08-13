@@ -31,9 +31,16 @@ Requires Xcode 26 or newer, iOS 17 or newer. Open `TaskBoard.xcodeproj`, build, 
        match /tasks/{taskId} {
          allow read, write: if true;
        }
+       match /archivedTasks/{taskId} {
+         allow read, write: if true;
+       }
      }
    }
    ```
+
+   Both collections need a rule. Firestore denies anything a `match` block
+   doesn't name, so leaving `archivedTasks` out fails the pull — and it fails
+   the whole sync, since the archive is fetched alongside the board.
 
    Log upload uses Storage, which has its own ruleset:
 
