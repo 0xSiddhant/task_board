@@ -32,6 +32,11 @@ nonisolated struct Task: Identifiable, Equatable {
     var updatedAt: Date
     var syncStatus: SyncStatus
     var deletedAt: Date?
+    /// The task this one is a subtask of, or nil for a top-level task. Nesting
+    /// is one level deep: a task with a parent never has children.
+    var parentId: UUID?
+
+    var isSubtask: Bool { parentId != nil }
 
     /// The form a deleted task takes on the wire. Both backends write this rather
     /// than removing the record, so other devices can tell a deletion apart from

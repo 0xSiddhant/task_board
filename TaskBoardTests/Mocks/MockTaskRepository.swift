@@ -38,7 +38,7 @@ final class MockTaskRepository: TaskRepository {
 
     // MARK: TaskRepository
 
-    func createTask(title: String, description: String) -> Task {
+    func createTask(title: String, description: String, parentId: UUID? = nil) -> Task {
         let timestamp = now()
         let task = Task(
             id: UUID(),
@@ -49,7 +49,13 @@ final class MockTaskRepository: TaskRepository {
             createdAt: timestamp,
             updatedAt: timestamp,
             syncStatus: .pending,
-            deletedAt: nil
+            deletedAt: nil,
+            // Mirrors the real repository: only a top-level task may be a parent.
+            parentId: parentId.flatMap { candidate in
+                guard let parent = storage[candidate], parent.deletedAt == nil, parent.parentId == nil
+                else { return nil }
+                return candidate
+            }
         )
         storage[task.id] = task
         enqueue(.create, taskId: task.id, baseUpdatedAt: timestamp)
@@ -83,11 +89,34 @@ final class MockTaskRepository: TaskRepository {
 
         storage[id] = task
         enqueue(.update, taskId: id, baseUpdatedAt: baseUpdatedAt)
+
+        // Only Done cascades, matching the real repository.
+        if status == .done {
+            var nextDone = nextPosition(in: .done)
+            for var child in descendants(of: id) where child.status != .done {
+                let childBase = child.updatedAt
+                child.status = .done
+                child.position = nextDone
+                child.updatedAt = now()
+                child.syncStatus = .pending
+                storage[child.id] = child
+                enqueue(.update, taskId: child.id, baseUpdatedAt: childBase)
+                nextDone += 1
+            }
+        }
+
         publish()
         return task
     }
 
     func deleteTask(id: UUID) {
+        guard storage[id] != nil else { return }
+        for child in descendants(of: id) { softDelete(child.id) }
+        softDelete(id)
+        publish()
+    }
+
+    private func softDelete(_ id: UUID) {
         guard var task = storage[id] else { return }
         let baseUpdatedAt = task.updatedAt
 
@@ -97,7 +126,81 @@ final class MockTaskRepository: TaskRepository {
 
         storage[id] = task
         enqueue(.delete, taskId: id, baseUpdatedAt: baseUpdatedAt)
+    }
+
+    // MARK: Hierarchy
+
+    @discardableResult
+    func setParent(id: UUID, parentId: UUID?) -> Task? {
+        guard var task = storage[id], task.deletedAt == nil else { return nil }
+
+        if let parentId {
+            guard parentId != id,
+                  let parent = storage[parentId],
+                  parent.deletedAt == nil,
+                  parent.parentId == nil,
+                  children(of: id).isEmpty,
+                  // Archived subtasks count too, or restoring them later would
+                  // build a three-level chain.
+                  archivedChildren(of: id).isEmpty
+            else { return nil }
+        }
+
+        let baseUpdatedAt = task.updatedAt
+        task.parentId = parentId
+        task.updatedAt = now()
+        task.syncStatus = .pending
+
+        storage[id] = task
+        enqueue(.update, taskId: id, baseUpdatedAt: baseUpdatedAt)
         publish()
+        return task
+    }
+
+    func childTasks(of id: UUID) -> [Task] {
+        children(of: id)
+    }
+
+    private func children(of id: UUID) -> [Task] {
+        storage.values
+            .filter { $0.deletedAt == nil && $0.parentId == id }
+            .sorted { $0.position < $1.position }
+    }
+
+    private func archivedChildren(of id: UUID) -> [ArchivedTask] {
+        archiveStorage.values
+            .filter { $0.parentId == id }
+            .sorted { $0.position < $1.position }
+    }
+
+    /// Whole subtree, parents ahead of their descendants — cascades walk this
+    /// rather than one level, matching the real repository.
+    private func descendants(of id: UUID) -> [Task] {
+        var result: [Task] = []
+        var seen: Set<UUID> = [id]
+        var frontier = [id]
+
+        while let current = frontier.popLast() {
+            for child in children(of: current) where seen.insert(child.id).inserted {
+                result.append(child)
+                frontier.append(child.id)
+            }
+        }
+        return result
+    }
+
+    private func archivedDescendants(of id: UUID) -> [ArchivedTask] {
+        var result: [ArchivedTask] = []
+        var seen: Set<UUID> = [id]
+        var frontier = [id]
+
+        while let current = frontier.popLast() {
+            for child in archivedChildren(of: current) where seen.insert(child.id).inserted {
+                result.append(child)
+                frontier.append(child.id)
+            }
+        }
+        return result
     }
 
     func fetchTasks(status: TaskStatus?) -> [Task] {
@@ -113,6 +216,13 @@ final class MockTaskRepository: TaskRepository {
     // MARK: Archive
 
     func archiveTask(id: UUID) {
+        guard storage[id] != nil else { return }
+        for child in descendants(of: id) { archive(child.id) }
+        archive(id)
+        publish()
+    }
+
+    private func archive(_ id: UUID) {
         guard let task = storage[id], task.deletedAt == nil else { return }
 
         archiveStorage[id] = ArchivedTask(
@@ -123,15 +233,24 @@ final class MockTaskRepository: TaskRepository {
             position: task.position,
             createdAt: task.createdAt,
             updatedAt: now(),
-            archivedAt: now()
+            archivedAt: now(),
+            parentId: task.parentId
         )
         enqueue(.archive, taskId: id, baseUpdatedAt: task.updatedAt)
         storage[id] = nil
-        publish()
     }
 
     @discardableResult
     func restoreTask(id: UUID) -> Task? {
+        guard archiveStorage[id] != nil else { return nil }
+        // Parent first, so its subtasks find it present and keep their link.
+        let restored = restore(id)
+        for child in archivedDescendants(of: id) { _ = restore(child.id) }
+        publish()
+        return restored
+    }
+
+    private func restore(_ id: UUID) -> Task? {
         guard let entry = archiveStorage[id] else { return nil }
 
         let task = Task(
@@ -143,12 +262,17 @@ final class MockTaskRepository: TaskRepository {
             createdAt: entry.createdAt,
             updatedAt: now(),
             syncStatus: .pending,
-            deletedAt: nil
+            deletedAt: nil,
+            // Dropped when the parent isn't on the board, so a subtask restored
+            // alone comes back top-level rather than dangling.
+            parentId: entry.parentId.flatMap { candidate in
+                guard let parent = storage[candidate], parent.deletedAt == nil else { return nil }
+                return candidate
+            }
         )
         storage[id] = task
         enqueue(.restore, taskId: id, baseUpdatedAt: entry.updatedAt)
         archiveStorage[id] = nil
-        publish()
         return task
     }
 

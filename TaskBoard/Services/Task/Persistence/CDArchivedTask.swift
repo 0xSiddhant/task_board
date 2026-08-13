@@ -17,6 +17,9 @@ nonisolated final class CDArchivedTask: NSManagedObject {
     @NSManaged var createdAt: Date
     @NSManaged var updatedAt: Date
     @NSManaged var archivedAt: Date
+    /// Carried across so restoring a parent rebuilds the hierarchy rather than
+    /// returning a flat set of tasks.
+    @NSManaged var parentId: UUID?
 }
 
 nonisolated extension CDArchivedTask {

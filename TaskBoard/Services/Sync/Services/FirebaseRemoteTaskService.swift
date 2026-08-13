@@ -90,7 +90,8 @@ private nonisolated extension ArchivedTask {
             "position": position,
             "createdAt": Timestamp(date: createdAt),
             "updatedAt": Timestamp(date: updatedAt),
-            "archivedAt": Timestamp(date: archivedAt)
+            "archivedAt": Timestamp(date: archivedAt),
+            "parentId": parentId?.uuidString as Any
         ]
     }
 
@@ -113,7 +114,8 @@ private nonisolated extension ArchivedTask {
             position: data["position"] as? Double ?? 0,
             createdAt: createdAt,
             updatedAt: updatedAt,
-            archivedAt: archivedAt
+            archivedAt: archivedAt,
+            parentId: (data["parentId"] as? String).flatMap(UUID.init(uuidString:))
         )
     }
 }
@@ -130,7 +132,8 @@ private nonisolated extension Task {
             "position": position,
             "createdAt": Timestamp(date: createdAt),
             "updatedAt": Timestamp(date: updatedAt),
-            "deletedAt": deletedAt.map { Timestamp(date: $0) } as Any
+            "deletedAt": deletedAt.map { Timestamp(date: $0) } as Any,
+            "parentId": parentId?.uuidString as Any
         ]
     }
 
@@ -155,7 +158,8 @@ private nonisolated extension Task {
             createdAt: createdAt,
             updatedAt: updatedAt,
             syncStatus: .synced,   // anything arriving from the server is, by definition
-            deletedAt: (data["deletedAt"] as? Timestamp)?.dateValue()
+            deletedAt: (data["deletedAt"] as? Timestamp)?.dateValue(),
+            parentId: (data["parentId"] as? String).flatMap(UUID.init(uuidString:))
         )
     }
 }

@@ -24,6 +24,10 @@ struct TaskColumnView: View {
     let dropAnchor: DropAnchor?
     let matchedIDs: Set<UUID>
     let isSearchActive: Bool
+    /// Both derived once by the view model from the task list it already holds,
+    /// so the column and its cards never look anything up themselves.
+    let parentTitles: [UUID: String]
+    let subtaskProgress: [UUID: SubtaskProgress]
     /// Set by the board when a match in this column should be brought into view.
     let scrollTarget: UUID?
     let onSelect: (Task) -> Void
@@ -126,6 +130,8 @@ struct TaskColumnView: View {
         TaskCardView(
             task: task,
             searchState: searchState(for: task),
+            parentTitle: parentTitles[task.id],
+            progress: subtaskProgress[task.id],
             onDragChanged: { translation, location in
                 onDragChanged(task, translation, location)
             },
