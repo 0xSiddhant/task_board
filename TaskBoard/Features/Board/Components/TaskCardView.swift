@@ -37,6 +37,11 @@ struct TaskCardView: View {
     let task: Task
     var isLifted = false
     var searchState: CardSearchState = .inactive
+    /// Set on a subtask, to show which task it belongs to. Absent when the
+    /// parent hasn't been pulled down yet, which reads as an ordinary card.
+    var parentTitle: String?
+    /// Set on a parent, to show how much of its checklist is finished.
+    var progress: SubtaskProgress?
     var onDragChanged: ((CGSize, CGPoint) -> Void)?
     var onDragEnded: (() -> Void)?
 
@@ -51,6 +56,10 @@ struct TaskCardView: View {
                 .accessibilityLabel(task.status.displayName)
 
             VStack(alignment: .leading, spacing: 4) {
+                if let parentTitle {
+                    breadcrumb(parentTitle)
+                }
+
                 Text(task.title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
@@ -61,6 +70,10 @@ struct TaskCardView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+                }
+
+                if let progress, progress.total > 0 {
+                    subtaskProgress(progress)
                 }
             }
 
@@ -93,6 +106,47 @@ struct TaskCardView: View {
         .animation(.smooth(duration: 0.25), value: isLifted)
         .animation(.smooth(duration: 0.25), value: task.status)
         .animation(.smooth(duration: 0.3), value: searchState)
+    }
+
+    /// Sits above the title rather than below it, so the card reads
+    /// "belongs to X" before it reads its own name.
+    private func breadcrumb(_ parentTitle: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: "arrow.turn.down.right")
+                .font(.caption2)
+            Text(parentTitle)
+                .font(.caption2.weight(.medium))
+                .lineLimit(1)
+        }
+        .foregroundStyle(.tertiary)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Subtask of \(parentTitle)")
+    }
+
+    private func subtaskProgress(_ progress: SubtaskProgress) -> some View {
+        let fraction = Double(progress.done) / Double(progress.total)
+        let isComplete = progress.done == progress.total
+
+        return HStack(spacing: 6) {
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.quaternary)
+                    Capsule()
+                        .fill(isComplete ? AnyShapeStyle(Color.green) : AnyShapeStyle(Color.accentColor))
+                        .frame(width: proxy.size.width * fraction)
+                }
+            }
+            .frame(height: 3)
+
+            Text("\(progress.done)/\(progress.total)")
+                .font(.caption2.weight(.semibold).monospacedDigit())
+                .foregroundStyle(isComplete ? AnyShapeStyle(Color.green) : AnyShapeStyle(.secondary))
+                .contentTransition(.numericText())
+        }
+        .padding(.top, 3)
+        .animation(.smooth(duration: 0.3), value: progress)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(progress.done) of \(progress.total) subtasks done")
     }
 
     private var borderStyle: AnyShapeStyle {

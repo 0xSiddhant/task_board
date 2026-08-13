@@ -15,4 +15,6 @@ nonisolated struct ArchivedTask: Identifiable, Equatable {
     let createdAt: Date
     var updatedAt: Date
     var archivedAt: Date
+    /// Preserved so restoring a parent puts its subtasks back as subtasks.
+    var parentId: UUID?
 }

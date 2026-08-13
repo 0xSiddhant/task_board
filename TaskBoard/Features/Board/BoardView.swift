@@ -55,6 +55,10 @@ struct ColumnFramesKey: PreferenceKey {
 struct BoardView: View {
     @StateObject private var viewModel: BoardViewModel
     @State private var formMode: TaskFormMode?
+    /// Where the sheet parks a task it wants opened after it closes. Presenting
+    /// a new `.sheet(item:)` while one is up doesn't reliably swap, so the
+    /// hand-off runs through `onDismiss` rather than a timer.
+    @State private var pendingFormMode: TaskFormMode?
 
     @State private var draggingTask: Task?
     @State private var dragTranslation: CGSize = .zero
@@ -127,8 +131,18 @@ struct BoardView: View {
                 }
             }
         }
-        .sheet(item: $formMode) { mode in
-            TaskFormSheet(mode: mode, useCases: useCases)
+        .sheet(item: $formMode) {
+            // Runs after the dismissal animation, so the next sheet presents
+            // onto a clean slate.
+            guard let next = pendingFormMode else { return }
+            pendingFormMode = nil
+            formMode = next
+        } content: { mode in
+            TaskFormSheet(
+                mode: mode,
+                useCases: useCases,
+                onOpenTask: { task in pendingFormMode = .edit(task) }
+            )
         }
     }
 
@@ -143,6 +157,8 @@ struct BoardView: View {
                         dropAnchor: dropTarget?.status == status ? dropTarget?.anchor : nil,
                         matchedIDs: viewModel.matchedIDs,
                         isSearchActive: viewModel.isSearchActive,
+                        parentTitles: viewModel.parentTitles,
+                        subtaskProgress: viewModel.subtaskProgress,
                         scrollTarget: scrollTarget,
                         onSelect: { formMode = .edit($0) },
                         onDragChanged: dragChanged,

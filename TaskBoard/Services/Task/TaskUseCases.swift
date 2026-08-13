@@ -9,9 +9,9 @@ struct TaskUseCases {
     }
 
     // Logged by id, never by title — these lines end up in an uploaded file.
-    func create(title: String, description: String) -> Task {
-        let task = repository.createTask(title: title, description: description)
-        Logger.record("Created task \(task.id)")
+    func create(title: String, description: String, parentId: UUID? = nil) -> Task {
+        let task = repository.createTask(title: title, description: description, parentId: parentId)
+        Logger.record("Created task \(task.id)\(parentId.map { " under \($0)" } ?? "")")
         return task
     }
 
@@ -28,6 +28,25 @@ struct TaskUseCases {
     func delete(id: UUID) {
         Logger.record("Deleted task \(id)")
         repository.deleteTask(id: id)
+    }
+
+    // MARK: Hierarchy
+
+    /// Links a task under a parent, or unlinks it when `parentId` is nil.
+    /// Returns nil when the link would break the one-level rule.
+    @discardableResult
+    func setParent(id: UUID, parentId: UUID?) -> Task? {
+        let task = repository.setParent(id: id, parentId: parentId)
+        if task == nil {
+            Logger.record("Rejected parent link for \(id)", level: .warning)
+        } else {
+            Logger.record(parentId.map { "Linked \(id) under \($0)" } ?? "Unlinked \(id)")
+        }
+        return task
+    }
+
+    func childTasks(of id: UUID) -> [Task] {
+        repository.childTasks(of: id)
     }
 
     // MARK: Archive

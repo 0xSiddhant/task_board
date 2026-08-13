@@ -21,7 +21,7 @@ nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unche
 
     // MARK: TaskRepository
 
-    func createTask(title: String, description: String) -> Task {
+    func createTask(title: String, description: String, parentId: UUID? = nil) -> Task {
         var result: Task!
         context.performAndWait {
             let now = Date()
@@ -35,6 +35,15 @@ nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unche
             cdTask.updatedAt = now
             cdTask.syncStatus = SyncStatus.pending.rawValue
             cdTask.deletedAt = nil
+            // Only honoured when the prospective parent exists and is itself
+            // top-level, so a subtask can never be created under another one.
+            cdTask.parentId = parentId.flatMap { candidate in
+                guard let parent = fetch(id: candidate),
+                      parent.deletedAt == nil,
+                      parent.parentId == nil
+                else { return nil }
+                return candidate
+            }
 
             enqueue(.create, taskId: cdTask.id, baseUpdatedAt: now)
             result = cdTask.toDomain()
@@ -71,8 +80,27 @@ nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unche
             cdTask.position = position
             cdTask.updatedAt = Date()
             cdTask.syncStatus = SyncStatus.pending.rawValue
-
             enqueue(.update, taskId: id, baseUpdatedAt: baseUpdatedAt)
+
+            // Finishing a parent finishes its subtasks. Only Done cascades:
+            // dragging a parent to In Progress would otherwise un-complete work
+            // that was genuinely finished.
+            if status == .done {
+                // Walked forward rather than re-querying per child, so the
+                // positions stay distinct without depending on how Core Data
+                // merges pending changes into a fetch.
+                var nextDone = nextPosition(in: .done)
+                for child in descendantRows(of: id) where child.status != TaskStatus.done.rawValue {
+                    let childBase = child.updatedAt
+                    child.status = TaskStatus.done.rawValue
+                    child.position = nextDone
+                    child.updatedAt = Date()
+                    child.syncStatus = SyncStatus.pending.rawValue
+                    enqueue(.update, taskId: child.id, baseUpdatedAt: childBase)
+                    nextDone += 1
+                }
+            }
+
             result = cdTask.toDomain()
             save()
         }
@@ -84,15 +112,114 @@ nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unche
     func deleteTask(id: UUID) {
         context.performAndWait {
             guard let cdTask = fetch(id: id) else { return }
-            let baseUpdatedAt = cdTask.updatedAt
 
-            cdTask.deletedAt = Date()
+            // The whole subtree goes with the parent. Empty for a subtask, so
+            // deleting one is unchanged.
+            for child in descendantRows(of: id) { softDelete(child) }
+            softDelete(cdTask)
+            save()
+        }
+    }
+
+    private func softDelete(_ cdTask: CDTask) {
+        let baseUpdatedAt = cdTask.updatedAt
+        cdTask.deletedAt = Date()
+        cdTask.updatedAt = Date()
+        cdTask.syncStatus = SyncStatus.pending.rawValue
+        enqueue(.delete, taskId: cdTask.id, baseUpdatedAt: baseUpdatedAt)
+    }
+
+    // MARK: Hierarchy
+
+    @discardableResult
+    func setParent(id: UUID, parentId: UUID?) -> Task? {
+        var result: Task?
+        context.performAndWait {
+            guard let cdTask = fetch(id: id), cdTask.deletedAt == nil else { return }
+
+            if let parentId {
+                guard parentId != id,                          // can't be its own parent
+                      let parent = fetch(id: parentId),
+                      parent.deletedAt == nil,
+                      parent.parentId == nil,                  // parent must be top-level
+                      childRows(of: id).isEmpty,               // and this task must have no subtasks
+                      // Archived ones count too. Without this, a task whose only
+                      // subtasks are archived looks childless, gets linked under
+                      // another task, and then restoring those subtasks builds a
+                      // three-level chain.
+                      archivedChildRows(of: id).isEmpty
+                else { return }
+            }
+
+            let baseUpdatedAt = cdTask.updatedAt
+            cdTask.parentId = parentId
             cdTask.updatedAt = Date()
             cdTask.syncStatus = SyncStatus.pending.rawValue
 
-            enqueue(.delete, taskId: id, baseUpdatedAt: baseUpdatedAt)
+            enqueue(.update, taskId: id, baseUpdatedAt: baseUpdatedAt)
+            result = cdTask.toDomain()
             save()
         }
+        return result
+    }
+
+    func childTasks(of id: UUID) -> [Task] {
+        var result: [Task] = []
+        context.performAndWait {
+            result = childRows(of: id).map { $0.toDomain() }
+        }
+        return result
+    }
+
+    /// Backed by the `byParentId` fetch index on `CDTask`.
+    private func childRows(of id: UUID) -> [CDTask] {
+        let request = CDTask.typedFetchRequest()
+        request.predicate = NSPredicate(format: "deletedAt == nil AND parentId == %@", id as CVarArg)
+        request.sortDescriptors = [NSSortDescriptor(key: "position", ascending: true)]
+        return (try? context.fetch(request)) ?? []
+    }
+
+    private func archivedChildRows(of id: UUID) -> [CDArchivedTask] {
+        let request = CDArchivedTask.typedFetchRequest()
+        request.predicate = NSPredicate(format: "parentId == %@", id as CVarArg)
+        request.sortDescriptors = [NSSortDescriptor(key: "position", ascending: true)]
+        return (try? context.fetch(request)) ?? []
+    }
+
+    /// Everything beneath `id`, parents always ahead of their own descendants.
+    ///
+    /// Nesting is capped at one level when links are made here, but a deeper
+    /// chain can still arrive — from a device running an older build, or from a
+    /// remote record `applyRemote` takes at face value. A cascade that stopped
+    /// after one level would strand those rows on the board with their parent
+    /// gone, so every cascade walks the whole subtree. `seen` also keeps a cycle
+    /// in bad data from spinning forever.
+    private func descendantRows(of id: UUID) -> [CDTask] {
+        var result: [CDTask] = []
+        var seen: Set<UUID> = [id]
+        var frontier = [id]
+
+        while let current = frontier.popLast() {
+            for child in childRows(of: current) where seen.insert(child.id).inserted {
+                result.append(child)
+                frontier.append(child.id)
+            }
+        }
+        return result
+    }
+
+    private func archivedDescendantRows(of id: UUID) -> [CDArchivedTask] {
+        var result: [CDArchivedTask] = []
+        var seen: Set<UUID> = [id]
+        var frontier = [id]
+
+        while let current = frontier.popLast() {
+            for child in archivedChildRows(of: current) where seen.insert(child.id).inserted {
+                result.append(child)
+                frontier.append(child.id)
+            }
+        }
+        return result
     }
 
     func fetchTasks(status: TaskStatus?) -> [Task] {
@@ -145,21 +272,29 @@ nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unche
         context.performAndWait {
             guard let cdTask = fetch(id: id), cdTask.deletedAt == nil else { return }
 
-            let entry = CDArchivedTask(context: context)
-            entry.id = cdTask.id
-            entry.title = cdTask.title
-            entry.taskDescription = cdTask.taskDescription
-            // The column and slot it held, which is what a restore reads back.
-            entry.status = cdTask.status
-            entry.position = cdTask.position
-            entry.createdAt = cdTask.createdAt
-            entry.updatedAt = Date()
-            entry.archivedAt = Date()
-
-            enqueue(.archive, taskId: id, baseUpdatedAt: cdTask.updatedAt)
-            context.delete(cdTask)
+            // The whole subtree leaves the board together, each row carrying its
+            // own entry so the queue can replay them independently.
+            for child in descendantRows(of: id) { archive(child) }
+            archive(cdTask)
             save()
         }
+    }
+
+    private func archive(_ cdTask: CDTask) {
+        let entry = CDArchivedTask(context: context)
+        entry.id = cdTask.id
+        entry.title = cdTask.title
+        entry.taskDescription = cdTask.taskDescription
+        // The column and slot it held, which is what a restore reads back.
+        entry.status = cdTask.status
+        entry.position = cdTask.position
+        entry.createdAt = cdTask.createdAt
+        entry.updatedAt = Date()
+        entry.archivedAt = Date()
+        entry.parentId = cdTask.parentId
+
+        enqueue(.archive, taskId: cdTask.id, baseUpdatedAt: cdTask.updatedAt)
+        context.delete(cdTask)
     }
 
     /// The mirror image: out of `CDArchivedTask`, back into `CDTask` in the
@@ -169,26 +304,46 @@ nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unche
         var result: Task?
         context.performAndWait {
             guard let entry = fetchArchived(id: id) else { return }
-            let status = TaskStatus(rawValue: entry.status) ?? .todo
-            let now = Date()
 
-            let cdTask = fetch(id: entry.id) ?? CDTask(context: context)
-            cdTask.id = entry.id
-            cdTask.title = entry.title
-            cdTask.taskDescription = entry.taskDescription
-            cdTask.status = entry.status
-            cdTask.position = restorePosition(entry.position, in: status)
-            cdTask.createdAt = entry.createdAt
-            cdTask.updatedAt = now
-            cdTask.syncStatus = SyncStatus.pending.rawValue
-            cdTask.deletedAt = nil
-
-            enqueue(.restore, taskId: entry.id, baseUpdatedAt: entry.updatedAt)
-            context.delete(entry)
-            result = cdTask.toDomain()
+            // The root first, then descendants in order, so every row finds its
+            // own parent already on the board and keeps its link rather than
+            // being flattened by the check in `restore`.
+            result = restore(entry)
+            for child in archivedDescendantRows(of: id) { _ = restore(child) }
             save()
         }
         return result
+    }
+
+    /// Always returns the task to the column it was archived from, never to the
+    /// parent's current one. A subtask archived from To Do comes back to To Do
+    /// even if the parent has since moved to Done — the cascade only fires when
+    /// a parent is moved, and a restore is the subtask acting on its own. The
+    /// parent's badge simply reads as incomplete again, which is true.
+    private func restore(_ entry: CDArchivedTask) -> Task {
+        let status = TaskStatus(rawValue: entry.status) ?? .todo
+
+        let cdTask = fetch(id: entry.id) ?? CDTask(context: context)
+        cdTask.id = entry.id
+        cdTask.title = entry.title
+        cdTask.taskDescription = entry.taskDescription
+        cdTask.status = entry.status
+        cdTask.position = restorePosition(entry.position, in: status)
+        cdTask.createdAt = entry.createdAt
+        cdTask.updatedAt = Date()
+        cdTask.syncStatus = SyncStatus.pending.rawValue
+        cdTask.deletedAt = nil
+        // Kept only if the parent is actually on the board. Restoring a subtask
+        // on its own while its parent is still archived brings it back as a
+        // top-level card instead of one pointing at something invisible.
+        cdTask.parentId = entry.parentId.flatMap { candidate in
+            guard let parent = fetch(id: candidate), parent.deletedAt == nil else { return nil }
+            return candidate
+        }
+
+        enqueue(.restore, taskId: entry.id, baseUpdatedAt: entry.updatedAt)
+        context.delete(entry)
+        return cdTask.toDomain()
     }
 
     /// Deduplicated because `publishArchived` runs after every save, most of
@@ -220,6 +375,7 @@ nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unche
             entry.createdAt = archived.createdAt
             entry.updatedAt = archived.updatedAt
             entry.archivedAt = archived.archivedAt
+            entry.parentId = archived.parentId
 
             if let cdTask = fetch(id: archived.id) { context.delete(cdTask) }
             save()
@@ -325,6 +481,7 @@ nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unche
             cdTask.updatedAt = task.updatedAt
             cdTask.syncStatus = SyncStatus.synced.rawValue
             cdTask.deletedAt = task.deletedAt
+            cdTask.parentId = task.parentId
             save()
         }
     }
@@ -410,7 +567,8 @@ private nonisolated extension CDArchivedTask {
             position: position,
             createdAt: createdAt,
             updatedAt: updatedAt,
-            archivedAt: archivedAt
+            archivedAt: archivedAt,
+            parentId: parentId
         )
     }
 }
@@ -426,7 +584,8 @@ private nonisolated extension CDTask {
             createdAt: createdAt,
             updatedAt: updatedAt,
             syncStatus: SyncStatus(rawValue: syncStatus) ?? .pending,
-            deletedAt: deletedAt
+            deletedAt: deletedAt,
+            parentId: parentId
         )
     }
 }

@@ -54,6 +54,19 @@ struct ArchiveView: View {
     private func row(_ task: ArchivedTask) -> some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
+                // A subtask archived alongside its parent keeps the link, so
+                // the archive names the group rather than reading as a flat
+                // list of identical "Subtask" labels.
+                if task.parentId != nil {
+                    Label(
+                        viewModel.parentTitle(for: task).map { "Subtask (\($0))" } ?? "Subtask",
+                        systemImage: "arrow.turn.down.right"
+                    )
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                }
+
                 Text(task.title)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
