@@ -20,6 +20,29 @@ nonisolated protocol TaskRepository: Sendable {
     /// out of the ViewModels.
     func tasksPublisher() -> AnyPublisher<[Task], Never>
 
+    // MARK: Archive
+
+    /// Moves the task out of the task table and into the archive table, keeping
+    /// the column and slot it held, and queues one `.archive` entry. A record
+    /// lives in exactly one of the two tables at any moment.
+    func archiveTask(id: UUID)
+
+    /// The reverse move, back into the column the task was archived from, and
+    /// one `.restore` entry.
+    @discardableResult
+    func restoreTask(id: UUID) -> Task?
+
+    /// Live view of the archive, newest first.
+    func archivedTasksPublisher() -> AnyPublisher<[ArchivedTask], Never>
+
+    /// The archived counterpart of `fetchTask` — what an `.archive` entry needs
+    /// to push, since by then the row has left the task table.
+    func fetchArchivedTask(id: UUID) -> ArchivedTask?
+
+    /// Applies remote archive state locally, dropping the task row if present.
+    /// The counterpart of `applyRemote`, which drops the archive row.
+    func applyRemoteArchive(_ archived: ArchivedTask)
+
     // MARK: Sync support
 
     /// Oldest first — the order the sync engine must drain them in.

@@ -12,6 +12,17 @@ nonisolated protocol RemoteTaskService: Sendable {
     func create(_ task: Task) async throws
     func update(_ task: Task) async throws
     func delete(_ task: Task) async throws
+
+    // MARK: Archive
+    //
+    // Archived records live in their own collection, not behind a flag on the
+    // task. Both calls move a record between the two and must do it atomically:
+    // a record that briefly exists in neither collection would look deleted to
+    // any device that pulled in between.
+
+    func fetchArchived() async throws -> [ArchivedTask]
+    func archive(_ archived: ArchivedTask) async throws
+    func restore(_ task: Task) async throws
 }
 
 enum RemoteError: Error {

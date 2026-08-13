@@ -45,6 +45,19 @@ struct TaskFormSheet: View {
                 TextField("Description", text: $viewModel.description, axis: .vertical)
                     .lineLimit(3...6)
 
+                if viewModel.canArchive {
+                    Section {
+                        Button {
+                            viewModel.archive()
+                            dismiss()
+                        } label: {
+                            Label("Archive Task", systemImage: "archivebox")
+                        }
+                    } footer: {
+                        Text("Moves the task off the board. Restore it from the archive to put it back in \(viewModel.archiveOriginLabel).")
+                    }
+                }
+
                 if viewModel.canDelete {
                     Section {
                         Button("Delete Task", role: .destructive) {

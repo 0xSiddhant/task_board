@@ -30,6 +30,24 @@ struct TaskUseCases {
         repository.deleteTask(id: id)
     }
 
+    // MARK: Archive
+
+    func observeArchived() -> AnyPublisher<[ArchivedTask], Never> {
+        repository.archivedTasksPublisher()
+    }
+
+    func archive(id: UUID) {
+        repository.archiveTask(id: id)
+        Logger.record("Archived task \(id)")
+    }
+
+    @discardableResult
+    func restore(id: UUID) -> Task? {
+        let task = repository.restoreTask(id: id)
+        Logger.record("Restored task \(id) to \(task?.status.rawValue ?? "nothing")")
+        return task
+    }
+
     /// Midpoint between neighbors. Handles both ends of a column without
     /// special-casing above.
     static func fractionalPosition(before: Double?, after: Double?) -> Double {

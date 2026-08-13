@@ -14,6 +14,9 @@ import Foundation
 /// `SimulatedFaultsRemoteService` so it applies to a real backend too.
 actor FakeRemoteTaskService: RemoteTaskService {
     private var storage: [UUID: Task] = [:]
+    /// The stand-in for the second collection, kept separate for the same reason
+    /// it is separate in Firestore.
+    private var archiveStorage: [UUID: ArchivedTask] = [:]
 
     func fetchTasks() async throws -> [Task] {
         Array(storage.values)
@@ -29,5 +32,23 @@ actor FakeRemoteTaskService: RemoteTaskService {
 
     func delete(_ task: Task) async throws {
         storage[task.id] = task.tombstone
+    }
+
+    // MARK: Archive
+
+    func fetchArchived() async throws -> [ArchivedTask] {
+        Array(archiveStorage.values)
+    }
+
+    /// Both sides in one step, matching the batched write the Firestore
+    /// implementation uses.
+    func archive(_ archived: ArchivedTask) async throws {
+        archiveStorage[archived.id] = archived
+        storage[archived.id] = nil
+    }
+
+    func restore(_ task: Task) async throws {
+        storage[task.id] = task
+        archiveStorage[task.id] = nil
     }
 }

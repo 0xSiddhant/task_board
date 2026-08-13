@@ -27,6 +27,14 @@ struct RootView: View {
                                 Label("Settings", systemImage: "gearshape")
                             }
                         }
+
+                        ToolbarItem(placement: .topBarLeading) {
+                            NavigationLink {
+                                ArchiveView(useCases: environment.taskUseCases)
+                            } label: {
+                                Label("Archive", systemImage: "archivebox")
+                            }
+                        }
                     }
             }
 
