@@ -77,6 +77,13 @@ actor SimulatedFaultsRemoteService: RemoteTaskService, RemoteTaskDebugControls {
         try await wrapped.restore(task)
     }
 
+    /// Passed straight through. Forced-offline suppresses *writes*; muting the
+    /// backend's change signal as well would leave the board stale after the
+    /// toggle goes back off, with nothing to prompt a pull.
+    func remoteChanges() async -> AsyncStream<Void> {
+        await wrapped.remoteChanges()
+    }
+
     /// Latency before failure, so a failing call still costs time and the pending
     /// state stays visible. Throwing here means the wrapped backend is never
     /// reached — an injected outage looks like a real one.

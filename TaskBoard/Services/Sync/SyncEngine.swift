@@ -105,6 +105,15 @@ actor SyncEngine {
             case .archived(let archived): return archived.updatedAt
             }
         }
+
+        /// A tombstone in the task collection. Archived records are not deleted
+        /// — they live in the other collection precisely so they stay findable.
+        var isDeleted: Bool {
+            switch self {
+            case .task(let task): return task.deletedAt != nil
+            case .archived: return false
+            }
+        }
     }
 
     private func apply(_ record: RemoteRecord) {
@@ -121,21 +130,53 @@ actor SyncEngine {
         }
     }
 
-    /// Last-write-wins. A newer server version overwrites locally and drops the
-    /// queued entry; a newer local version is left for the push to carry up.
+    /// Resolves queued writes against what the server holds, in two tiers.
+    ///
+    /// **A remote delete always wins**, whatever the timestamps say. Comparing
+    /// versions is how two competing *edits* are settled, but a deletion isn't
+    /// an edit — it says the record should not exist. Letting a newer local
+    /// edit win that race would push an `update`, and since an update writes
+    /// `deletedAt: nil`, it would resurrect a task the server had deleted. The
+    /// local edit is discarded and the tombstone applied, so the task leaves
+    /// this board too.
+    ///
+    /// **Everything else is last-write-wins.** A newer server version overwrites
+    /// locally and drops the queued entry; a newer local version is left for the
+    /// push to carry up.
     ///
     /// The local side is looked up in both tables, since a queued `.archive` has
     /// already moved its row across.
     private func resolveConflicts(for pending: [OutboxEntry], against serverByID: [UUID: RemoteRecord]) {
+        var serverWon = Set<UUID>()
+
         for entry in pending {
-            guard let record = serverByID[entry.taskId],
-                  hasConflict(baseUpdatedAt: entry.baseUpdatedAt, serverUpdatedAt: record.updatedAt),
+            guard let record = serverByID[entry.taskId] else { continue }
+
+            // An earlier entry for this task already resolved in the server's
+            // favour, so every remaining entry describes a change that has been
+            // superseded. Dropping them matters: applying the server's state
+            // makes local and server equal, so the version check below would no
+            // longer fire and the push would send the server's own state back.
+            if serverWon.contains(entry.taskId) {
+                repository.removeOutboxEntry(id: entry.id)
+                continue
+            }
+
+            if record.isDeleted {
+                apply(record)
+                repository.removeOutboxEntry(id: entry.id)
+                serverWon.insert(entry.taskId)
+                continue
+            }
+
+            guard hasConflict(baseUpdatedAt: entry.baseUpdatedAt, serverUpdatedAt: record.updatedAt),
                   let localUpdatedAt = localUpdatedAt(for: entry.taskId)
             else { continue }
 
             if record.updatedAt > localUpdatedAt {
                 apply(record)
                 repository.removeOutboxEntry(id: entry.id)
+                serverWon.insert(entry.taskId)
             }
         }
     }
@@ -144,17 +185,44 @@ actor SyncEngine {
         repository.fetchTask(id: id)?.updatedAt ?? repository.fetchArchivedTask(id: id)?.updatedAt
     }
 
+    /// Keeps draining until the outbox is empty, a push fails, or the pass limit
+    /// is hit.
+    ///
+    /// A single pass over one snapshot would leave anything queued *while* that
+    /// pass was in flight sitting until the next trigger. That was tolerable
+    /// when every trigger was a user or system event; now that another device's
+    /// write starts a sync, a queue that only half-drains is much more visible.
+    ///
+    /// The limit exists because each pass can legitimately find new work —
+    /// someone editing while the queue drains would otherwise keep this running.
+    /// Whatever is left over waits for the next trigger, as before.
+    private func push() async {
+        for pass in 1...Self.maxPushPasses {
+            let pending = repository.pendingOutboxEntries()
+            guard !pending.isEmpty else { return }
+
+            guard await drain(pending) else { return }   // stopped on a failure
+
+            if pass == Self.maxPushPasses, !repository.pendingOutboxEntries().isEmpty {
+                await log("Outbox still has entries after \(pass) push passes, leaving them queued", level: .warning)
+            }
+        }
+    }
+
+    private static let maxPushPasses = 5
+
     /// Drains oldest-first and stops on the first failure. Skipping ahead would
     /// reorder writes against the same task, so a stuck entry blocks the queue.
-    private func push() async {
-        for entry in repository.pendingOutboxEntries() {
+    /// Returns false when it stopped early.
+    private func drain(_ pending: [OutboxEntry]) async -> Bool {
+        for entry in pending {
             let sent: Bool
             do {
                 sent = try await perform(entry)
             } catch {
                 repository.markSyncStatus(.failed, for: entry.taskId)
                 await log("Sync push failed for \(entry.taskId): \(error)", level: .error)
-                return
+                return false
             }
 
             // A deleted task keeps its soft-deleted row rather than being erased.
@@ -163,6 +231,7 @@ actor SyncEngine {
             if sent { repository.markSyncStatus(.synced, for: entry.taskId) }
             repository.removeOutboxEntry(id: entry.id)
         }
+        return true
     }
 
     /// Sends one entry, reading its payload from whichever table now holds the

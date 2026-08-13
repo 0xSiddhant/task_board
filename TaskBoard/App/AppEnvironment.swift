@@ -30,6 +30,7 @@ final class AppEnvironment: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
     private var dismissTask: _Concurrency.Task<Void, Never>?
+    private var remoteChangeTask: _Concurrency.Task<Void, Never>?
 
     init(inMemory: Bool = false) {
         stack = CoreDataStack(inMemory: inMemory)
@@ -89,8 +90,25 @@ final class AppEnvironment: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // The sixth trigger, and the only one that isn't about this device: the
+        // backend reporting that another device wrote something. Our own pushes
+        // are filtered out inside the remote service, so a local sync doesn't
+        // feed itself. `SyncEngine` drops overlapping syncs, so a signal that
+        // lands mid-sync is ignored rather than queued.
+        let remote = self.remote
+        remoteChangeTask = _Concurrency.Task { [weak self] in
+            for await _ in await remote.remoteChanges() {
+                Logger.record("Another device changed the backend, syncing")
+                await self?.syncNow()
+            }
+        }
+
         let reporter = Self.makeCrashReporter(usesFirebase: usesFirebase)
         _Concurrency.Task { await Logger.shared.attach(crashReporter: reporter) }
+    }
+
+    deinit {
+        remoteChangeTask?.cancel()
     }
 
     /// The trigger that covers someone working continuously in the foreground,

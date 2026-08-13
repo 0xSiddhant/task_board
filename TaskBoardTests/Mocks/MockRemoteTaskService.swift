@@ -74,6 +74,7 @@ actor MockRemoteTaskService: RemoteTaskService {
     func delete(_ task: Task) async throws {
         try await record(.delete)
         serverTasks[task.id] = task.tombstone
+        serverArchived[task.id] = nil   // a delete outranks an archive
     }
 
     // MARK: Archive
