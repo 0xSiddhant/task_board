@@ -16,6 +16,9 @@ actor SyncEngine {
     private let remote: RemoteTaskService
     private let timeout: TimeInterval
     private var isSyncing = false
+    /// Set when a sync is requested while one is already running, so the request
+    /// is deferred to the next pass rather than dropped.
+    private var needsAnotherPass = false
 
     /// Firestore retries a rejected write stream indefinitely rather than
     /// erroring, so a misconfigured backend hangs `sync()` forever and the queue
@@ -44,17 +47,40 @@ actor SyncEngine {
         }
     }
 
-    /// Pull, diff, resolve, push. Resolving before pushing is the point: it stops
-    /// a write that was already superseded from going up.
+    /// Runs a pass, then runs another if anything asked for one while it was in
+    /// flight.
     ///
-    /// Overlapping calls are dropped rather than queued. Launch, foreground, and
-    /// background fetch can all fire within the same moment, and two passes over
-    /// one outbox would race each other to drain the same entries.
+    /// Overlapping calls still never run concurrently — two passes over one
+    /// outbox would race to drain the same entries. But they must not be thrown
+    /// away either: a request arriving mid-pass usually means something changed
+    /// *after* that pass had already pulled, so dropping it loses the change
+    /// until the next trigger. That is the shape of a sync that silently goes
+    /// missing and needs a manual one to recover.
+    ///
+    /// Bounded, because a device being actively edited elsewhere could otherwise
+    /// keep this going indefinitely; leftovers wait for the next trigger.
     func sync() async {
-        guard !isSyncing else { return }
+        guard !isSyncing else {
+            needsAnotherPass = true
+            return
+        }
+
         isSyncing = true
         defer { isSyncing = false }
 
+        for _ in 1...Self.maxSyncPasses {
+            needsAnotherPass = false
+            await runPass()
+            guard needsAnotherPass else { return }
+            await log("A change arrived while syncing, running another pass")
+        }
+    }
+
+    private static let maxSyncPasses = 3
+
+    /// Pull, diff, resolve, push. Resolving before pushing is the point: it stops
+    /// a write that was already superseded from going up.
+    private func runPass() async {
         let remoteTasks: [Task]
         let remoteArchived: [ArchivedTask]
         do {

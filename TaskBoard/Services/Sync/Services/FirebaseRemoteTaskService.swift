@@ -12,56 +12,10 @@ import FirebaseFirestore
 /// Firestore-backed remote. Documents are keyed by the task's own UUID, so an
 /// outbox entry replayed twice overwrites the same document instead of creating
 /// a duplicate.
-/// Document paths this device has written and not yet seen echoed back by the
-/// snapshot listeners.
-///
-/// A snapshot listener reports local writes as well as remote ones, so without
-/// this every push would echo back as a "remote change" and start another sync.
-/// Keyed by full document path, not by task id, because `archive`, `restore`,
-/// and `delete` each touch both collections — consuming one id once would leave
-/// the second collection's listener treating its half as foreign.
-///
-/// Entries expire: a batch that deletes a document which never existed produces
-/// no change event, so its path would otherwise sit here forever and swallow a
-/// genuine change to that path much later.
-/// `nonisolated` and `@unchecked`, not because the project defaults to
-/// MainActor but because this is reached from Firestore's callback queue: the
-/// lock is what makes it safe, and main-actor isolation would defeat the point.
-private nonisolated final class LocalEchoTracker: @unchecked Sendable {
-    private let lock = NSLock()
-    private var pending: [String: Date] = [:]
-    private let lifetime: TimeInterval = 30
-
-    func note(_ path: String) {
-        lock.lock()
-        defer { lock.unlock() }
-        prune()
-        pending[path] = Date()
-    }
-
-    /// True when this change is the echo of our own write, consuming it so a
-    /// later change to the same document is treated as foreign.
-    func consume(_ path: String) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        prune()
-        return pending.removeValue(forKey: path) != nil
-    }
-
-    private func prune() {
-        let cutoff = Date().addingTimeInterval(-lifetime)
-        pending = pending.filter { $0.value > cutoff }
-    }
-}
-
 actor FirebaseRemoteTaskService: RemoteTaskService {
     private let firestore: Firestore
     private let collection: CollectionReference
     private let archiveCollection: CollectionReference
-
-    /// nonisolated because both the actor's writes and the snapshot callbacks —
-    /// which arrive on Firestore's own queue — have to reach it.
-    private nonisolated let echoes = LocalEchoTracker()
 
     /// Held so the registrations outlive `remoteChanges()`. They run for the
     /// process lifetime, which matches the single `AppEnvironment` that consumes
@@ -88,15 +42,11 @@ actor FirebaseRemoteTaskService: RemoteTaskService {
     }
 
     func create(_ task: Task) async throws {
-        let document = collection.document(task.id.uuidString)
-        echoes.note(document.path)
-        try await document.setData(task.firestoreData)
+        try await collection.document(task.id.uuidString).setData(task.firestoreData)
     }
 
     func update(_ task: Task) async throws {
-        let document = collection.document(task.id.uuidString)
-        echoes.note(document.path)
-        try await document.setData(task.firestoreData, merge: true)
+        try await collection.document(task.id.uuidString).setData(task.firestoreData, merge: true)
     }
 
     /// Writes the tombstone and clears any archive document for the same id, in
@@ -135,43 +85,50 @@ actor FirebaseRemoteTaskService: RemoteTaskService {
     }
 
     /// Every operation that moves a record between the two collections runs as
-    /// one batch, and notes both document paths so neither listener mistakes
-    /// its half of the move for another device's work.
+    /// one batch, so the record is never in both or neither.
     private func commitAcrossBothCollections(
         id: UUID,
         _ build: (WriteBatch, DocumentReference, DocumentReference) -> Void
     ) async throws {
-        let taskDocument = collection.document(id.uuidString)
-        let archiveDocument = archiveCollection.document(id.uuidString)
-
-        echoes.note(taskDocument.path)
-        echoes.note(archiveDocument.path)
-
         let batch = firestore.batch()
-        build(batch, taskDocument, archiveDocument)
+        build(batch, collection.document(id.uuidString), archiveCollection.document(id.uuidString))
         try await batch.commit()
     }
 
     // MARK: Live updates
 
+    /// Buffers the newest signal only. The payload is empty, so ten changes
+    /// arriving during one sync mean the same thing as one: pull again.
     func remoteChanges() async -> AsyncStream<Void> {
-        AsyncStream { continuation in
+        AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             listeners.append(listen(to: collection, yielding: continuation))
             listeners.append(listen(to: archiveCollection, yielding: continuation))
         }
     }
 
-    /// `includeMetadataChanges` stays off, so a local write produces exactly one
-    /// callback rather than a second when the server acknowledges it — which is
-    /// what lets one noted path match one consumed echo.
+    /// Our own writes are filtered by `hasPendingWrites` alone.
+    ///
+    /// `includeMetadataChanges` stays off, so a local write raises exactly one
+    /// callback — the latency-compensated one, before the server acknowledges,
+    /// where that flag is true. The acknowledgement changes only metadata and
+    /// raises nothing. So a local write is never seen with the flag clear, and
+    /// anything reaching us without it came from somewhere else.
     private func listen(
         to collection: CollectionReference,
         yielding continuation: AsyncStream<Void>.Continuation
     ) -> ListenerRegistration {
         var hasLoadedInitialSnapshot = false
+        let path = collection.path
 
-        return collection.addSnapshotListener { [echoes] snapshot, error in
-            guard let snapshot, error == nil else { return }
+        return collection.addSnapshotListener { snapshot, error in
+            if let error {
+                // Firestore tears a listener down on a permissions failure and
+                // it does not come back, which would silently end live updates.
+                // Worth a line in the log rather than a mystery.
+                Logger.record("Snapshot listener on \(path) failed: \(error)", level: .error)
+                return
+            }
+            guard let snapshot else { return }
 
             // The first callback is just the collection's current contents,
             // which the sync at launch already covers.
@@ -180,16 +137,9 @@ actor FirebaseRemoteTaskService: RemoteTaskService {
                 return
             }
 
-            // Every change is consumed, not just those up to the first foreign
-            // one — short-circuiting would leave our own echoes queued and make
-            // the *next* change look foreign.
-            var isFromAnotherDevice = false
-            for change in snapshot.documentChanges {
-                if change.document.metadata.hasPendingWrites { continue }
-                if echoes.consume(change.document.reference.path) { continue }
-                isFromAnotherDevice = true
+            let isFromAnotherDevice = snapshot.documentChanges.contains {
+                !$0.document.metadata.hasPendingWrites
             }
-
             if isFromAnotherDevice { continuation.yield() }
         }
     }
