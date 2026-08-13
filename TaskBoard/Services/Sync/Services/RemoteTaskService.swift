@@ -23,6 +23,29 @@ nonisolated protocol RemoteTaskService: Sendable {
     func fetchArchived() async throws -> [ArchivedTask]
     func archive(_ archived: ArchivedTask) async throws
     func restore(_ task: Task) async throws
+
+    // MARK: Live updates
+
+    /// Emits when the backend reports a change made by *another* device, so
+    /// this one can pull it without waiting for a launch, a foreground, or a
+    /// background refresh.
+    ///
+    /// Deliberately carries no payload: the signal only says "something moved",
+    /// and the pull that follows goes through the same reconciliation as every
+    /// other sync. Applying pushed documents directly would bypass conflict
+    /// resolution and the outbox.
+    ///
+    /// This device's own writes must not appear here — otherwise every push
+    /// would echo back and start another sync.
+    func remoteChanges() async -> AsyncStream<Void>
+}
+
+extension RemoteTaskService {
+    /// A backend with no push channel simply never emits. The in-memory fake is
+    /// single-device by definition, so there is nothing for it to report.
+    func remoteChanges() async -> AsyncStream<Void> {
+        AsyncStream { $0.finish() }
+    }
 }
 
 enum RemoteError: Error {

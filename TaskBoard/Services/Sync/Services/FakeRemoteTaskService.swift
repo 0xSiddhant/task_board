@@ -30,8 +30,10 @@ actor FakeRemoteTaskService: RemoteTaskService {
         storage[task.id] = task
     }
 
+    /// Clears the archive copy too — a delete outranks an archive.
     func delete(_ task: Task) async throws {
         storage[task.id] = task.tombstone
+        archiveStorage[task.id] = nil
     }
 
     // MARK: Archive
