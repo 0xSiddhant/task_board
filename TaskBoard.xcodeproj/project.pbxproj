@@ -34,6 +34,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+				taskboard_trace.trace,
 			);
 			target = 9CF4146930266135000F7633 /* TaskBoard */;
 		};
