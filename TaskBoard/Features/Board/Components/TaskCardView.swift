@@ -25,6 +25,35 @@ extension TaskStatus {
     }
 }
 
+extension SyncStatus {
+    var symbolName: String {
+        switch self {
+        case .pending: return "clock"
+        case .syncing: return "arrow.triangle.2.circlepath"
+        case .synced: return "checkmark.circle.fill"
+        case .failed: return "exclamationmark.triangle.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .pending: return .orange
+        case .syncing: return .blue
+        case .synced: return .green
+        case .failed: return .red
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .pending: return "Waiting to sync"
+        case .syncing: return "Syncing"
+        case .synced: return "Synced"
+        case .failed: return "Sync failed"
+        }
+    }
+}
+
 /// How a card relates to the current search. `inactive` is the resting state, so
 /// nothing changes when no one is searching.
 enum CardSearchState {
@@ -45,7 +74,16 @@ struct TaskCardView: View {
     var onDragChanged: ((CGSize, CGPoint) -> Void)?
     var onDragEnded: (() -> Void)?
 
+    /// What the badge is currently showing, which is not always `task.syncStatus`:
+    /// `.synced` is held briefly and then cleared, so a settled board carries no
+    /// sync decoration at all.
+    @State private var visibleStatus: SyncStatus?
+    @State private var clearTask: _Concurrency.Task<Void, Never>?
+
     private var isMatch: Bool { searchState == .match }
+
+    /// How long the success tick lingers before fading.
+    private let successLinger: Duration = .seconds(2)
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -79,6 +117,17 @@ struct TaskCardView: View {
 
             Spacer(minLength: 4)
 
+            if let status = visibleStatus {
+                Image(systemName: status.symbolName)
+                    .font(.caption)
+                    .foregroundStyle(status.tint)
+                    // The icon itself morphs pending → success; the transition
+                    // below only runs when the badge appears or goes away.
+                    .contentTransition(.symbolEffect(.replace))
+                    .accessibilityLabel(status.accessibilityLabel)
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+
             dragHandle
         }
         .padding(12)
@@ -106,6 +155,37 @@ struct TaskCardView: View {
         .animation(.smooth(duration: 0.25), value: isLifted)
         .animation(.smooth(duration: 0.25), value: task.status)
         .animation(.smooth(duration: 0.3), value: searchState)
+        // isInitial matters: on launch every task is already `.synced`, and
+        // without this the whole board would flash green ticks at once.
+        .onAppear { showBadge(for: task.syncStatus, isInitial: true) }
+        .onChange(of: task.syncStatus) { _, status in
+            showBadge(for: status, isInitial: false)
+        }
+        .onDisappear { clearTask?.cancel() }
+    }
+
+    /// Pending and failed persist — they're states the user needs to keep seeing.
+    /// Synced is an acknowledgement rather than a state, so it shows only when the
+    /// task actually transitions, then clears itself.
+    private func showBadge(for status: SyncStatus, isInitial: Bool) {
+        clearTask?.cancel()
+
+        guard status == .synced else {
+            withAnimation(.smooth(duration: 0.25)) { visibleStatus = status }
+            return
+        }
+
+        guard !isInitial else {
+            visibleStatus = nil
+            return
+        }
+
+        withAnimation(.smooth(duration: 0.25)) { visibleStatus = .synced }
+        clearTask = _Concurrency.Task {
+            try? await _Concurrency.Task.sleep(for: successLinger)
+            guard !_Concurrency.Task.isCancelled else { return }
+            withAnimation(.smooth(duration: 0.4)) { visibleStatus = nil }
+        }
     }
 
     /// Sits above the title rather than below it, so the card reads
