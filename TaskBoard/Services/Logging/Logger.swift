@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import os
 
 enum LogLevel: String {
     case debug = "DEBUG"
@@ -25,6 +26,7 @@ actor Logger {
     private let maxFileSizeBytes: Int
     private var fileHandle: FileHandle?
     private var crashReporter: CrashReporter = NoOpCrashReporter()
+    let logger = os.Logger(subsystem: "com.siddhant.TaskBoard", category: "Logger")
 
     private init(maxFileSizeBytes: Int = 2_000_000) {   // ~2 MB per generation, ~4 MB retained max
         let dir = Logger.logsDirectory()
@@ -55,7 +57,16 @@ actor Logger {
         let line = "[\(Self.timestamp())] [\(level.rawValue)] \(message)\n"
 
         #if DEBUG
-        print(line, terminator: "")
+        switch level {
+        case .debug:
+            logger.debug("\(line, privacy: .public)")
+        case .info:
+            logger.info("\(line, privacy: .public)")
+        case .warning:
+            logger.warning("\(line, privacy: .public)")
+        case .error:
+            logger.error("\(line, privacy: .public)")
+        }
         #endif
 
         write(line)

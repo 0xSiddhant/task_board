@@ -68,11 +68,13 @@ actor SyncEngine {
         isSyncing = true
         defer { isSyncing = false }
 
-        for _ in 1...Self.maxSyncPasses {
-            needsAnotherPass = false
-            await runPass()
-            guard needsAnotherPass else { return }
-            await log("A change arrived while syncing, running another pass")
+        await Signposts.span(Signposts.sync, "Sync") {
+            for _ in 1...Self.maxSyncPasses {
+                needsAnotherPass = false
+                await runPass()
+                guard needsAnotherPass else { return }
+                await log("A change arrived while syncing, running another pass")
+            }
         }
     }
 
@@ -81,35 +83,41 @@ actor SyncEngine {
     /// Pull, diff, resolve, push. Resolving before pushing is the point: it stops
     /// a write that was already superseded from going up.
     private func runPass() async {
-        let remoteTasks: [Task]
-        let remoteArchived: [ArchivedTask]
-        do {
-            let remote = self.remote
-            remoteTasks = try await withTimeout { try await remote.fetchTasks() }
-            remoteArchived = try await withTimeout { try await remote.fetchArchived() }
-        } catch {
-            // Nothing drained, nothing marked failed: the queue is untouched.
-            await log("Sync pull failed: \(error)", level: .error)
-            return
+        await Signposts.span(Signposts.sync, "SyncPass") {
+            let remoteTasks: [Task]
+            let remoteArchived: [ArchivedTask]
+            do {
+                let remote = self.remote
+                remoteTasks = try await Signposts.span(Signposts.sync, "SyncPullTasks") {
+                    try await withTimeout { try await remote.fetchTasks() }
+                }
+                remoteArchived = try await Signposts.span(Signposts.sync, "SyncPullArchived") {
+                    try await withTimeout { try await remote.fetchArchived() }
+                }
+            } catch {
+                // Nothing drained, nothing marked failed: the queue is untouched.
+                await log("Sync pull failed: \(error)", level: .error)
+                return
+            }
+
+            // Archived last, so a record the server somehow holds in both
+            // collections resolves to archived rather than to whichever the
+            // dictionary happened to keep.
+            var serverByID = [UUID: RemoteRecord]()
+            for task in remoteTasks { serverByID[task.id] = .task(task) }
+            for archived in remoteArchived { serverByID[archived.id] = .archived(archived) }
+
+            let pending = repository.pendingOutboxEntries()
+            let queuedTaskIDs = Set(pending.map(\.taskId))
+
+            await log("Sync pulled \(remoteTasks.count) remote task(s) and \(remoteArchived.count) archived, \(pending.count) queued locally")
+
+            applyUncontestedRemoteChanges(serverByID, skipping: queuedTaskIDs)
+            resolveConflicts(for: pending, against: serverByID)
+            await push()
+
+            await log("Sync finished, \(repository.pendingOutboxEntries().count) entr(ies) still queued")
         }
-
-        // Archived last, so a record the server somehow holds in both
-        // collections resolves to archived rather than to whichever the
-        // dictionary happened to keep.
-        var serverByID = [UUID: RemoteRecord]()
-        for task in remoteTasks { serverByID[task.id] = .task(task) }
-        for archived in remoteArchived { serverByID[archived.id] = .archived(archived) }
-
-        let pending = repository.pendingOutboxEntries()
-        let queuedTaskIDs = Set(pending.map(\.taskId))
-
-        await log("Sync pulled \(remoteTasks.count) remote task(s) and \(remoteArchived.count) archived, \(pending.count) queued locally")
-
-        applyUncontestedRemoteChanges(serverByID, skipping: queuedTaskIDs)
-        resolveConflicts(for: pending, against: serverByID)
-        await push()
-
-        await log("Sync finished, \(repository.pendingOutboxEntries().count) entr(ies) still queued")
     }
 
     func hasConflict(baseUpdatedAt: Date, serverUpdatedAt: Date) -> Bool {
@@ -223,14 +231,16 @@ actor SyncEngine {
     /// someone editing while the queue drains would otherwise keep this running.
     /// Whatever is left over waits for the next trigger, as before.
     private func push() async {
-        for pass in 1...Self.maxPushPasses {
-            let pending = repository.pendingOutboxEntries()
-            guard !pending.isEmpty else { return }
+        await Signposts.span(Signposts.sync, "SyncPush") {
+            for pass in 1...Self.maxPushPasses {
+                let pending = repository.pendingOutboxEntries()
+                guard !pending.isEmpty else { return }
 
-            guard await drain(pending) else { return }   // stopped on a failure
+                guard await drain(pending) else { return }   // stopped on a failure
 
-            if pass == Self.maxPushPasses, !repository.pendingOutboxEntries().isEmpty {
-                await log("Outbox still has entries after \(pass) push passes, leaving them queued", level: .warning)
+                if pass == Self.maxPushPasses, !repository.pendingOutboxEntries().isEmpty {
+                    await log("Outbox still has entries after \(pass) push passes, leaving them queued", level: .warning)
+                }
             }
         }
     }
@@ -266,27 +276,29 @@ actor SyncEngine {
     /// since moved on, and replaying it would undo the newer intent. Dropping it
     /// is how archive/restore churn collapses to the final state.
     private func perform(_ entry: OutboxEntry) async throws -> Bool {
-        let remote = self.remote
+        try await Signposts.span(Signposts.sync, "SyncPushEntry") {
+            let remote = self.remote
 
-        switch entry.op {
-        case .create, .update, .delete:
-            guard let task = repository.fetchTask(id: entry.taskId) else { return false }
             switch entry.op {
-            case .create: try await withTimeout { try await remote.create(task) }
-            case .update: try await withTimeout { try await remote.update(task) }
-            default:      try await withTimeout { try await remote.delete(task) }
+            case .create, .update, .delete:
+                guard let task = repository.fetchTask(id: entry.taskId) else { return false }
+                switch entry.op {
+                case .create: try await withTimeout { try await remote.create(task) }
+                case .update: try await withTimeout { try await remote.update(task) }
+                default:      try await withTimeout { try await remote.delete(task) }
+                }
+
+            case .archive:
+                guard let archived = repository.fetchArchivedTask(id: entry.taskId) else { return false }
+                try await withTimeout { try await remote.archive(archived) }
+
+            case .restore:
+                guard let task = repository.fetchTask(id: entry.taskId) else { return false }
+                try await withTimeout { try await remote.restore(task) }
             }
 
-        case .archive:
-            guard let archived = repository.fetchArchivedTask(id: entry.taskId) else { return false }
-            try await withTimeout { try await remote.archive(archived) }
-
-        case .restore:
-            guard let task = repository.fetchTask(id: entry.taskId) else { return false }
-            try await withTimeout { try await remote.restore(task) }
+            return true
         }
-
-        return true
     }
 
     private func log(_ message: String, level: LogLevel = .info) async {

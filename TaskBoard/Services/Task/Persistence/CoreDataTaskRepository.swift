@@ -243,20 +243,22 @@ nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unche
     }
 
     private func startObserving() {
-        let request = CDTask.typedFetchRequest()
-        request.predicate = NSPredicate(format: "deletedAt == nil")
-        request.sortDescriptors = [NSSortDescriptor(key: "position", ascending: true)]
+        Signposts.span(Signposts.persistence, "CoreDataInitialFetch") {
+            let request = CDTask.typedFetchRequest()
+            request.predicate = NSPredicate(format: "deletedAt == nil")
+            request.sortDescriptors = [NSSortDescriptor(key: "position", ascending: true)]
 
-        let controller = NSFetchedResultsController(
-            fetchRequest: request,
-            managedObjectContext: context,
-            sectionNameKeyPath: nil,
-            cacheName: nil
-        )
-        controller.delegate = self
-        try? controller.performFetch()
-        self.controller = controller
-        publishCurrent()
+            let controller = NSFetchedResultsController(
+                fetchRequest: request,
+                managedObjectContext: context,
+                sectionNameKeyPath: nil,
+                cacheName: nil
+            )
+            controller.delegate = self
+            try? controller.performFetch()
+            self.controller = controller
+            publishCurrent()
+        }
     }
 
     private func publishCurrent() {
@@ -521,13 +523,15 @@ nonisolated final class CoreDataTaskRepository: NSObject, TaskRepository, @unche
     /// persisted without its outbox entry, or the reverse.
     private func save() {
         guard context.hasChanges else { return }
-        do {
-            try context.save()
-            publishOutboxCount()
-            publishArchived()
-        } catch {
-            context.rollback()
-            Logger.record("Core Data save failed: \(error)", level: .error)
+        Signposts.span(Signposts.persistence, "CoreDataSave") {
+            do {
+                try context.save()
+                publishOutboxCount()
+                publishArchived()
+            } catch {
+                context.rollback()
+                Logger.record("Core Data save failed: \(error)", level: .error)
+            }
         }
     }
 }

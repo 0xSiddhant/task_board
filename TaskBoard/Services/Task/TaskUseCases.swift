@@ -10,24 +10,32 @@ struct TaskUseCases {
 
     // Logged by id, never by title — these lines end up in an uploaded file.
     func create(title: String, description: String, parentId: UUID? = nil) -> Task {
-        let task = repository.createTask(title: title, description: description, parentId: parentId)
-        Logger.record("Created task \(task.id)\(parentId.map { " under \($0)" } ?? "")")
-        return task
+        Signposts.span(Signposts.useCase, "CreateTask") {
+            let task = repository.createTask(title: title, description: description, parentId: parentId)
+            Logger.record("Created task \(task.id)\(parentId.map { " under \($0)" } ?? "")")
+            return task
+        }
     }
 
     func update(id: UUID, title: String?, description: String?) -> Task? {
-        Logger.record("Updated task \(id)")
-        return repository.updateTask(id: id, title: title, description: description)
+        Signposts.span(Signposts.useCase, "UpdateTask") {
+            Logger.record("Updated task \(id)")
+            return repository.updateTask(id: id, title: title, description: description)
+        }
     }
 
     func move(id: UUID, to status: TaskStatus, afterPosition before: Double?, beforePosition after: Double?) -> Task? {
-        Logger.record("Moved task \(id) to \(status.rawValue)")
-        return repository.moveTask(id: id, to: status, position: Self.fractionalPosition(before: before, after: after))
+        Signposts.span(Signposts.useCase, "MoveTask") {
+            Logger.record("Moved task \(id) to \(status.rawValue)")
+            return repository.moveTask(id: id, to: status, position: Self.fractionalPosition(before: before, after: after))
+        }
     }
 
     func delete(id: UUID) {
-        Logger.record("Deleted task \(id)")
-        repository.deleteTask(id: id)
+        Signposts.span(Signposts.useCase, "DeleteTask") {
+            Logger.record("Deleted task \(id)")
+            repository.deleteTask(id: id)
+        }
     }
 
     // MARK: Hierarchy
@@ -36,13 +44,15 @@ struct TaskUseCases {
     /// Returns nil when the link would break the one-level rule.
     @discardableResult
     func setParent(id: UUID, parentId: UUID?) -> Task? {
-        let task = repository.setParent(id: id, parentId: parentId)
-        if task == nil {
-            Logger.record("Rejected parent link for \(id)", level: .warning)
-        } else {
-            Logger.record(parentId.map { "Linked \(id) under \($0)" } ?? "Unlinked \(id)")
+        Signposts.span(Signposts.useCase, "SetParent") {
+            let task = repository.setParent(id: id, parentId: parentId)
+            if task == nil {
+                Logger.record("Rejected parent link for \(id)", level: .warning)
+            } else {
+                Logger.record(parentId.map { "Linked \(id) under \($0)" } ?? "Unlinked \(id)")
+            }
+            return task
         }
-        return task
     }
 
     func childTasks(of id: UUID) -> [Task] {
@@ -56,15 +66,19 @@ struct TaskUseCases {
     }
 
     func archive(id: UUID) {
-        repository.archiveTask(id: id)
-        Logger.record("Archived task \(id)")
+        Signposts.span(Signposts.useCase, "ArchiveTask") {
+            repository.archiveTask(id: id)
+            Logger.record("Archived task \(id)")
+        }
     }
 
     @discardableResult
     func restore(id: UUID) -> Task? {
-        let task = repository.restoreTask(id: id)
-        Logger.record("Restored task \(id) to \(task?.status.rawValue ?? "nothing")")
-        return task
+        Signposts.span(Signposts.useCase, "RestoreTask") {
+            let task = repository.restoreTask(id: id)
+            Logger.record("Restored task \(id) to \(task?.status.rawValue ?? "nothing")")
+            return task
+        }
     }
 
     /// Midpoint between neighbors. Handles both ends of a column without

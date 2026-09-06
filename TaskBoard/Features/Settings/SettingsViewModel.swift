@@ -101,7 +101,9 @@ final class SettingsViewModel: ObservableObject {
 
         let data = await Logger.shared.exportData()
         do {
-            try await uploadService.upload(logData: data, metadata: .current())
+            try await Signposts.span(Signposts.upload, "UploadLogs") {
+                try await uploadService.upload(logData: data, metadata: .current())
+            }
             // Only after a confirmed upload — resetting earlier discards logs
             // that never made it anywhere.
             await Logger.shared.reset()

@@ -23,7 +23,9 @@ nonisolated enum BackgroundSync {
             schedule()
 
             let work = _Concurrency.Task {
-                await handler()
+                await Signposts.span(Signposts.sync, "BackgroundSync") {
+                    await handler()
+                }
                 task.setTaskCompleted(success: true)
             }
             task.expirationHandler = { work.cancel() }
